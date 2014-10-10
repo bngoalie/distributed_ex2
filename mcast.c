@@ -96,8 +96,7 @@ int main(int argc, char **argv)
     Packet *start_packet;
     int waiting = 1;
     /* Wait for start_mcast packet*/
-    while (waiting == 1)
-    {
+    while (waiting == 1) {
         temp_mask = mask;
         num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
         if (num > 0) {
@@ -125,7 +124,19 @@ int main(int argc, char **argv)
     for (;;) {
         if (has_token == 1) {
             /* TODO: Burst messages */
+            /* TODO: while passing an mcast token, consider a smaller burst for messages */
+            int burst_count = 0;
+            /*Send first half of packets*/
+            while (burst_count < BURST_MSG/2) {
+                
+                burst_count++;
+            } 
             /* TODO: Send out (multicast) mcast_token */
+            /* Send rest of messages*/
+            while (burst_count < BURST_MSG) {
+                
+                burst_count++;
+            }
             /* Set has_token to zero because sent out token*/
             has_token = 0;
         }
