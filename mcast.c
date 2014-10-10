@@ -15,12 +15,17 @@ int main()
     fd_set             dummy_mask,temp_mask;
     int                bytes;
     int                num;
-    char               mess_buf[MAX_MESS_LEN];
-    char               input_buf[80];
+    char               mess_buf[MAX_PACKET_SIZE];
+    int                machine_id;
+    int                num_packets;
+    int                loss_rate;
 
-    mcast_addr = 225 << 24 | 0 << 16 | 1 << 8 | 1; /* (225.0.1.1) */
 
-    sr = socket(AF_INET, SOCK_DGRAM, 0); /* socket for receiving */
+    /* TODO: Parse input arguements */
+
+    mcast_addr = MCAST_IP; // (225.1.2.101)
+
+    sr = socket(AF_INET, SOCK_DGRAM, 0); // socket for receiving
     if (sr<0) {
         perror("Mcast: socket");
         exit(1);
@@ -28,7 +33,7 @@ int main()
 
     name.sin_family = AF_INET;
     name.sin_addr.s_addr = INADDR_ANY;
-    name.sin_port = htons(PORT);
+    name.sin_port = htons(MCAST_PORT);
 
     if ( bind( sr, (struct sockaddr *)&name, sizeof(name) ) < 0 ) {
         perror("Mcast: bind");
@@ -36,8 +41,6 @@ int main()
     }
 
     mreq.imr_multiaddr.s_addr = htonl( mcast_addr );
-
-    /* the interface could be changed to a specific interface if needed */
     mreq.imr_interface.s_addr = htonl( INADDR_ANY );
 
     if (setsockopt(sr, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *)&mreq, 
@@ -56,34 +59,62 @@ int main()
     if (setsockopt(ss, IPPROTO_IP, IP_MULTICAST_TTL, (void *)&ttl_val, 
         sizeof(ttl_val)) < 0) 
     {
-        printf("Mcast: problem in setsockopt of multicast ttl %d - ignore in WinNT or Win95\n", ttl_val );
+        printf("Mcast: problem in setsockopt of multicast ttl %d", ttl_val );
     }
 
     send_addr.sin_family = AF_INET;
     send_addr.sin_addr.s_addr = htonl(mcast_addr);  /* mcast address */
-    send_addr.sin_port = htons(PORT);
+    send_addr.sin_port = htons(MCAST_PORT);
 
     FD_ZERO( &mask );
     FD_ZERO( &dummy_mask );
     FD_SET( sr, &mask );
-    FD_SET( (long)0, &mask );    /* stdin */
-    for(;;)
+    Packet *start_packet;
+    int waiting = 1;
+    /* Wait for start_mcast packet*/
+    while (waiting == 1)
     {
         temp_mask = mask;
         num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
         if (num > 0) {
             if ( FD_ISSET( sr, &temp_mask) ) {
-                bytes = recv( sr, mess_buf, sizeof(mess_buf), 0 );
-                mess_buf[bytes] = 0;
-                printf( "received : %s\n", mess_buf );
-            }else if( FD_ISSET(0, &temp_mask) ) {
-                bytes = read( 0, input_buf, sizeof(input_buf) );
-                input_buf[bytes] = 0;
-                printf( "there is an input: %s\n", input_buf );
-                sendto( ss, input_buf, strlen(input_buf), 0, 
-                    (struct sockaddr *)&send_addr, sizeof(send_addr) );
+                recv( sr, mess_buf, sizeof(mess_buf), 0 );
+                start_packet = (Packet *)&mess_buf;
+                if (start_packet->type == 0) {
+                    /* Received start_mcast packet type. Exit while loop.*/
+                    printf("BEGINNIG MULTICAST\n");
+                    waiting = 0;
+                }
             }
         }
+    }
+
+    /* Initialize ucast socket */
+
+    int round = 0;
+    int has_token = 0;
+    McastToken mcast_token;
+    if (machine_id == 0) {
+        /* TODO: Create first token*/
+        has_token = 1;
+    }
+    for (;;) {
+        if (has_token == 1) {
+            /* TODO: Burst messages */
+            /* TODO: Send out (multicast) mcast_token */
+            /* Set has_token to zero because sent out token*/
+            has_token = 0;
+        }
+        /* Select: receive or timeout. */
+        temp_mask = mask;
+        num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
+        if (num > 0) {
+            if ( FD_ISSET( sr, &temp_mask) ) {
+                /*  TODO: Check type of packet. If is token, set has_token to 1.*/
+            } else {
+                /* TIMEOUT*/
+            }
+        } 
     }
 
     return 0;

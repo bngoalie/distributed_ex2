@@ -1,27 +1,19 @@
 CC=gcc
 
-CFLAGS = -c -std=c99 -Wall -pedantic -g
+CFLAGS = -c -std=c99 -Wall -Wextra -pedantic -g -D_GNU_SOURCE
 
-all: ncp rcv t_ncp t_rcv
+all: start_mcast mcast
 
-ncp: ncp.o sendto_dbg.o
-	    $(CC) -o ncp ncp.o sendto_dbg.o
+start_mcast: start_mcast.o
+	    $(CC) -o start_mcast start_mcast.o
 
-rcv: rcv.o sendto_dbg.o
-	    $(CC) -o rcv rcv.o sendto_dbg.o
-
-t_ncp: t_ncp.o
-	    $(CC) -o t_ncp t_ncp.o
-
-t_rcv: t_rcv.o
-	    $(CC) -o t_rcv t_rcv.o
+mcast: mcast mcast.o recv_dbg.o
+	    $(CC) -o mcast mcast.o recv_dbg.o
 
 clean:
 	rm *.o
-	rm ncp
-	rm rcv
-	rm t_ncp
-	rm t_rcv
+	rm start_mcast
+	rm mcast
 
 %.o:    %.c
 	$(CC) $(CFLAGS) $*.c

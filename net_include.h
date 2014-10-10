@@ -11,24 +11,30 @@
 #include <errno.h>
 
 #define MCAST_PORT	    10010
-#define MCAST_IP        4278256229  // IP: 255.01.02.101
+#define UNICAST_PORT    10011
+#define MCAST_IP        225 << 24 | 1 << 16 | 2 << 8 | 101; /* (255.1.2.101)  */
 #define BURST_MSG       20
 #define WINDOW_SIZE     2048
 #define MAX_PACKET_SIZE WINDOW_SIZE * 4 + 12
 #define PAYLOAD_SIZE    1200
 #define BURST_TOKEN     2
-#define PACKET_ID       int
-#define PACKET_TYPE     int
+
+/* Packet types:
+ * 0:   Start multicast
+ * 1:   Multicast token
+ * 2:   Unicast token
+ * 3:   Multicast message
+ */
 
 /* Packet: Struct for generic packet */
 typedef struct {
-    PACKET_TYPE type;
-    char payload[MAX_PACKET_SIZE- sizeof(PACKET_TYPE)];    
+    int type;
+    char payload[MAX_PACKET_SIZE- sizeof(int)];    
 } Packet;
 
 /* McastToken: Struct for multicasted token */
 typedef struct {
-    PACKET_TYPE type;
+    int type;
     int         seq;
     int         aru;
     int         recv;
@@ -38,12 +44,18 @@ typedef struct {
 
 /* Token: Struct for standard unicasted token */
 typedef struct {
-    PACKET_TYPE type;
+    int         type;
     int         seq;
     int         aru;
-    int         sndr;
     int         recv;
-    int         ip_array[10];   // Max 10 machines
-    int         rtr[MAX_PACKET_SIZE - 56];
+    int         rtr[MAX_PACKET_SIZE - 12];
 } Token;
 
+/* Message: Struct for multicasted message */
+typedef struct {
+    int         type;
+    int         machine;
+    int         packet_id;
+    int         rand;
+    int         payload[PAYLOAD_SIZE];
+} Message;
