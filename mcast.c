@@ -1,6 +1,7 @@
 #include "net_include.h"
+#include "recv_dbg.h"
 
-int main()
+int main(int argc, char **argv)
 {
     struct sockaddr_in name;
     struct sockaddr_in send_addr;
@@ -18,11 +19,34 @@ int main()
     char               mess_buf[MAX_PACKET_SIZE];
     int                machine_id;
     int                num_packets;
+    int                num_machines;
     int                loss_rate;
 
 
-    /* TODO: Parse input arguements */
+    /* Parse input arguements */
 
+    /* Need four arguements: number of packets, machine index, 
+     * number of machines, and loss_rate_percent */
+    if(argc != 5) {
+        printf("Usage: mcast <num_of_packets> <machine_index> <num_of_machines>\
+ <loss_rate>\n");
+        exit(0);
+    }
+
+    /* Number of packets */
+    num_packets = atoi(argv[1]);
+
+    /* Machine Index */
+    machine_id = atoi(argv[2]);
+
+    /* Number of Machines */
+    num_machiens = atoi(argv[3]);
+
+    /* Set loss rate */
+    loss_rate = atoi(argv[4]);
+    recv_dbg_init(loss_rate, machine_id);
+
+    /*Set up Multicasting*/
     mcast_addr = MCAST_IP; // (225.1.2.101)
 
     sr = socket(AF_INET, SOCK_DGRAM, 0); // socket for receiving
