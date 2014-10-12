@@ -23,7 +23,8 @@
  * 0:   Start multicast
  * 1:   Multicast token
  * 2:   Unicast token
- * 3:   Multicast message
+ * 3:   Ending token
+ * 4:   Multicast message
  */
 
 /* Packet: Struct for generic packet */
@@ -32,15 +33,15 @@ typedef struct {
     char payload[MAX_PACKET_SIZE- sizeof(int)];    
 } Packet;
 
-/* McastToken: Struct for multicasted token */
+/* StartToken: Struct for starting token */
 typedef struct {
-    int type;
+    int         type;
     int         seq;
     int         aru;
     int         recv;
     int         ip_array[10];   // Max 10 machines
     int         rtr[MAX_PACKET_SIZE - 52];
-} McastToken;
+} StartToken;
 
 /* Token: Struct for standard unicasted token */
 typedef struct {
@@ -50,6 +51,16 @@ typedef struct {
     int         recv;
     int         rtr[MAX_PACKET_SIZE - 12];
 } Token;
+
+/* EndToken: Struct for ending unicasted token */
+typedef struct {
+    int         type;
+    int         seq;
+    int         aru;
+    int         recv;
+    int         done;   // Use bitmasks
+    int         rtr[MAX_PACKET_SIZE - 16];
+} EndToken;
 
 /* Message: Struct for multicasted message */
 typedef struct {
