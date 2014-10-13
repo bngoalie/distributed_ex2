@@ -247,7 +247,7 @@ int main(int argc, char **argv) {
              * to array of packets to send in burst. */
             Message *packets_to_burst[BURST_MSG];
             int packets_to_burst_itr = 0;
-            int window_itr = aru;
+            int window_itr = start_of_window;
             int rtr_itr = 0;
             int rtr_size = token.type == 1 ? bytes - 56 : bytes - 16;
             int new_rtr[MAX_PACKET_SIZE - 16];
