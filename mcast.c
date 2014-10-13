@@ -4,12 +4,9 @@
 #define TIMEOUT_USEC 500
 #define DEBUG 1
 
-struct sockaddr_in initUnicastSend(int next_ip);
+struct sockaddr_in initUnicastSend(int);
 
 int main(int argc, char **argv) {
-    if(DEBUG == 1) {
-        printf("start main\n");
-    }
     /*
      *  DECLARATIONS
      */
@@ -148,7 +145,7 @@ int main(int argc, char **argv) {
     
     int has_token = 0;
     Token token;
-    if (machine_id == 0) {
+    if (machine_id == 1) {
         /* Set initial start token vals */
         token.seq = -1;
         token.aru = -1;
@@ -177,7 +174,9 @@ int main(int argc, char **argv) {
                 recv( sr, mess_buf, sizeof(mess_buf), 0 );
                 start_packet = (Packet *)&mess_buf;
                 if (start_packet->type == 0) {  // Received start_mcast packet
-                    printf("BEGINNIG MULTICAST\n");
+                    if (DEBUG) {
+                        printf("BEGINNIG MULTICAST\n");
+                    }
                     waiting = 0;
                 }
             }
@@ -192,6 +191,9 @@ int main(int argc, char **argv) {
         timeout.tv_usec = TIMEOUT_USEC;
         
         if (has_token == 1) {
+            if(DEBUG == 1) {
+                printf("Has token\n");
+            }
             if (send_addr_ucast_ack.sin_addr.s_addr == 0 && token.type == 1  
                 && ((StartToken *)&token)->ip_array[(machine_id - 2 + num_machines) % num_machines + 1] != 0) {
                 send_addr_ucast_ack = initUnicastSend(
@@ -359,10 +361,16 @@ int main(int argc, char **argv) {
             
             /* Send token using appropriate socket */
             if (send_addr_ucast.sin_addr.s_addr == 0) {
-                /* Multicast Token */  
+                /* Multicast Token */
+                if(DEBUG == 1) {
+                    printf("multicast token\n");
+                }
                 sendto(ss, (char *)&token, token_size, 0, 
                     (struct sockaddr *)&send_addr, sizeof(send_addr) );
             } else {
+                if(DEBUG == 1) {
+                    printf("unicast token\n");
+                }
                 /* Unicast Token */
                 sendto(uss, (char *)&token, token_size, 0, 
                   (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));
@@ -381,8 +389,16 @@ int main(int argc, char **argv) {
             
             /* Deliver (write) packets received by all */
             if (tmp_prev_aru <= prev_aru) {
+                if(DEBUG == 1) {
+                    printf("Attempting to deliver\n");
+                }                   
                 while (window[start_of_window % WINDOW_SIZE].type != -1 
                     && window[start_of_window % WINDOW_SIZE].packet_id <= tmp_prev_aru) {
+                    if(DEBUG == 1) {
+                         printf("start_of_window: %d\n", start_of_window);
+                         printf("packet_id: %d\n", window[start_of_window % WINDOW_SIZE].packet_id);
+                         printf("tmp_prev_aru: %d\n", tmp_prev_aru);
+                    }
                     /* Deliver window[start_of_window] */
                     Message *tmp_msg = &(window[start_of_window % WINDOW_SIZE]);
                     fprintf(fw, "%2d, %8d, %8d\n", tmp_msg->machine, 
@@ -402,6 +418,9 @@ int main(int argc, char **argv) {
                          burst_count++;
                     }
                 }
+                if (DEBUG) {
+                    printf("exit attempt to deliver\n");
+                }
             }
             
             /* Set has_token to zero because sent out token*/
@@ -417,9 +436,15 @@ int main(int argc, char **argv) {
                 /* Received multicasted packet. Can be message or StartToken */
                 /* Check type of packet. If is token, set has_token to 1.*/
                 bytes = recv_dbg(sr, mess_buf, MAX_PACKET_SIZE, 0);
-                 if (((Packet *)mess_buf)->type == 1 
+                if (DEBUG) {
+                    printf("received packet of type %d\n", ((Packet *)mess_buf)->type);
+                }
+                if (((Packet *)mess_buf)->type == 1 
                      && ((Token *)mess_buf)->recv == machine_id
                      && prev_recvd_seq < token.seq) {
+                     if(DEBUG == 1) {
+                         printf("received token\n");
+                     }
                      /* Received packet is a token */
                      /* Use token if we have not received this token before. */
                      /* Copy received token into local placeholder for token. */
@@ -428,6 +453,9 @@ int main(int argc, char **argv) {
                  } else if (((Packet *)mess_buf)->type == 3) {
                      /* Check if is implicit token ack */
                      Message *tmp_msg = (Message *)&mess_buf;
+                     if(DEBUG == 1) {
+                         printf("received message of id %d\n", tmp_msg->packet_id);
+                     }
                      if (tmp_msg->packet_id > packet_id) {
                          waiting_for_token_ack = 0;
                      }
@@ -437,11 +465,18 @@ int main(int argc, char **argv) {
                      window[tmp_msg->packet_id % WINDOW_SIZE].rand = tmp_msg->rand;
                  }
             } else if ( FD_ISSET( usr, &temp_mask) ) {
+
                 /* Is unicasted packet */
                 bytes = recv_dbg(usr, mess_buf, MAX_PACKET_SIZE, 0);
+                if (DEBUG) {
+                    printf("received unicast packet of type %d\n", ((Packet *)mess_buf)->type);
+                }               
                 if ((((Packet *)mess_buf)->type == 1 
                     || ((Packet *)mess_buf)->type == 2)
-                    && prev_recvd_seq < token.seq) {
+                    && prev_recvd_seq < ((Token *)mess_buf)->seq) {
+                    if(DEBUG == 1) {
+                         printf("received token\n");
+                    }
                     /* Received packet is a token */
                     /* Use token if we have not received this token before. */
                     /* Copy received token into local placeholder for token. */
