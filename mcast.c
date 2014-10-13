@@ -1,15 +1,22 @@
 #include "net_include.h"
 #include "recv_dbg.h"
+#include <math.h>
+#define TIMEOUT_USEC 500
+#define DEBUG 1
 
-struct sockaddr_in initUnicastSend(int* uss, int next_ip);
-int main(int argc, char **argv)
-{
+struct sockaddr_in initUnicastSend(int next_ip);
+
+int main(int argc, char **argv) {
+    if(DEBUG == 1) {
+        printf("start main\n");
+    }
     /*
      *  DECLARATIONS
      */
     struct sockaddr_in name;
     struct sockaddr_in send_addr;
     struct sockaddr_in send_addr_ucast;
+    struct sockaddr_in send_addr_ucast_ack;
     int                mcast_addr;
     struct ip_mreq     mreq;
     unsigned char      ttl_val;
@@ -22,8 +29,22 @@ int main(int argc, char **argv)
     char               mess_buf[MAX_PACKET_SIZE];
     int                machine_id;
     int                num_packets;
+    int                num_packets_sent = 0;
     int                num_machines;
     int                loss_rate;
+    Message            window[WINDOW_SIZE];
+    int                waiting_for_token_ack = 0;
+    int                aru = -1;
+    int                prev_aru = -1;
+    int                lowered_aru = 0;
+    int                start_of_window = 0;
+    int                prev_recvd_seq = -1;
+    FILE               *fw = NULL;
+    int                random_number;
+    int                packet_id = -1;
+    int                token_size = 0;
+    struct timeval     timeout;
+
 
 
     /* 
@@ -46,6 +67,17 @@ int main(int argc, char **argv)
     /* Initialize recv_dbg with loss rate */
     recv_dbg_init(loss_rate, machine_id);
     
+    send_addr_ucast.sin_addr.s_addr = 0;
+    send_addr_ucast_ack.sin_addr.s_addr = 0;
+    
+    /* Open file writer */
+    char file_name[15];
+    sprintf(file_name, "%d", machine_id);
+    if((fw = fopen(strcat(file_name, ".out"), "w")) == NULL) {
+        perror("fopen");
+        exit(0);
+    }
+    
     /* Set up Unicast Receive (send has to wait) */
     usr = socket(AF_INET, SOCK_DGRAM, 0);   // Socket for receiving unicast
     if (usr<0) {
@@ -60,6 +92,13 @@ int main(int argc, char **argv)
     /* socket on which to receive*/
     if (bind(usr, (struct sockaddr *)&name, sizeof(name) ) < 0 ) {
         perror("Ucast: bind");
+        exit(1);
+    }
+    
+    /* Socket on which to send */
+    uss = socket(AF_INET, SOCK_DGRAM, 0); /* socket for sending (udp) */
+    if (uss<0) {
+        perror("Ucast: socket");
         exit(1);
     }
 
@@ -107,7 +146,6 @@ int main(int argc, char **argv)
     send_addr.sin_addr.s_addr = htonl(mcast_addr);  // Multicast address
     send_addr.sin_port = htons(MCAST_PORT);
     
-    int round = 0;
     int has_token = 0;
     Token token;
     if (machine_id == 0) {
@@ -115,11 +153,10 @@ int main(int argc, char **argv)
         token.seq = -1;
         token.aru = -1;
         token.recv = 1;
+        token.type = 1;
+        bytes = 56;
         has_token = 1;
     }
-    
-    /* TODO: Initialize ucast socket */
-    
 
     /* Set masks for I/O Multiplexing */
     FD_ZERO( &mask );
@@ -151,27 +188,108 @@ int main(int argc, char **argv)
      *  LOOP
      */ 
     for (;;) {
+        timeout.tv_sec = 0;
+        timeout.tv_usec = TIMEOUT_USEC;
+        
         if (has_token == 1) {
-            int packet_id = token.seq + 1;
-            /* TODO: Burst messages */
-            /* TODO: while passing an mcast token, consider a smaller burst for messages */
-            Message send_msg;
-            send_msg.type = 4;
-            send_msg.machine = machine_id;
+            if (send_addr_ucast_ack.sin_addr.s_addr == 0 && token.type == 1  
+                && ((StartToken *)&token)->ip_array[(machine_id - 2 + num_machines) % num_machines + 1] != 0) {
+                send_addr_ucast_ack = initUnicastSend(
+                    ((StartToken *)&token)->ip_array[(machine_id - 2 + num_machines) % num_machines + 1]);
+            }
+            if (send_addr_ucast_ack.sin_addr.s_addr != 0) {
+                /* Unicast ack*/
+                int four = 4;
+                sendto(uss, (char *)&four, 4, 0, 
+                    (struct sockaddr *)&send_addr_ucast_ack, sizeof(send_addr_ucast_ack));
+            }
             
+            int tmp_prev_aru = prev_aru;
+               
+            /* Check rtr for packets machine is holding. If have packet, add 
+             * to array of packets to send in burst. */
+            Message *packets_to_burst[BURST_MSG];
+            int packets_to_burst_itr = 0;
+            int window_itr = start_of_window;
+            int rtr_itr = 0;
+            int rtr_size = token.type == 1 ? bytes - 56 : bytes - 16;
+            int new_rtr[MAX_PACKET_SIZE - 16];
+            int new_rtr_itr = 0;
+
+            while (rtr_itr < rtr_size && window_itr <= prev_recvd_seq) {
+                if (window[window_itr % WINDOW_SIZE].type == -1) {
+                    new_rtr[new_rtr_itr] = window_itr % WINDOW_SIZE;
+                    if (token.rtr[rtr_itr] == window_itr % WINDOW_SIZE) {
+                        rtr_itr++;
+                    }
+                    window_itr++;
+                    new_rtr_itr++;
+                } else if (token.rtr[rtr_itr] < window[window_itr % WINDOW_SIZE].packet_id) {
+                    new_rtr[new_rtr_itr] = token.rtr[rtr_itr];
+                    new_rtr_itr++;
+                    rtr_itr++;
+                } else if (token.rtr[rtr_itr] == window[window_itr % WINDOW_SIZE].packet_id) {
+                    if (packets_to_burst_itr < BURST_MSG) {
+                        packets_to_burst[packets_to_burst_itr] = &(window[window_itr % WINDOW_SIZE]);
+                        packets_to_burst_itr++;
+                    } else {
+                        new_rtr[new_rtr_itr] = token.rtr[rtr_itr];
+                        new_rtr_itr++;
+                    }
+                    window_itr++;
+                    rtr_itr++;
+                } else {
+                    window_itr++;
+                }
+            }
+            
+            while (rtr_itr < rtr_size) {
+                new_rtr[++new_rtr_itr] = token.rtr[++rtr_itr];
+            }
+            while (window_itr <= prev_recvd_seq) {
+                if (window[window_itr % WINDOW_SIZE].type == -1) {
+                    new_rtr[new_rtr_itr] = window_itr % WINDOW_SIZE;
+                    window_itr++;
+                    new_rtr_itr++;
+                }
+            }
+            
+            /* TODO: while passing an mcast token, consider a smaller burst for 
+             * messages */
+            packet_id = token.seq;
+            while (packets_to_burst_itr < BURST_MSG 
+                    && num_packets_sent+1 <= num_packets
+                    && window[packet_id+1].type == -1) {
+                packet_id++;
+                 /* This is not a truly uniform distribution of random numbers */
+                random_number = (rand() % RAND_RANGE_MAX) + 1;
+                window[packet_id % WINDOW_SIZE].type = 3;
+                window[packet_id % WINDOW_SIZE].packet_id = packet_id;
+                window[packet_id % WINDOW_SIZE].machine = machine_id;
+                window[packet_id % WINDOW_SIZE].rand = random_number;
+                packets_to_burst[packets_to_burst_itr] = &(window[packet_id % WINDOW_SIZE]);
+                num_packets_sent++;
+                packets_to_burst_itr++;
+            }
 
             int burst_count = 0;
             /*Send first half of packets*/
-            while (burst_count < BURST_MSG/2) {
-                
+            while (burst_count < packets_to_burst_itr/2) {
+                /* Multicast Message */  
+                sendto(ss, (char *)packets_to_burst[burst_count], sizeof(Message),
+                       0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
                 burst_count++;
             } 
-            /* TODO: Send out multicast/unicast token */
-            if (uss == 0 && token.type == 1  
+            /* If token is a StartToken and this machine has yet to establish 
+             * who to unicast to. */
+            if (send_addr_ucast.sin_addr.s_addr == 0 && token.type == 1  
                 && ((StartToken *)&token)->ip_array[machine_id % num_machines] != 0) {
-                send_address_ucast = initUnicastSend(&uss, 
+                send_addr_ucast = initUnicastSend(
                     ((StartToken *)&token)->ip_array[machine_id % num_machines]);
             }
+            
+            /* If the StartToken being passed around has yet to establish this 
+             * machine's IP address, set it. */
             if (token.type == 1 
                 && ((StartToken *)&token)->ip_array[machine_id-1] == 0) {
                 /*If the start token has not set this machine's ip address yet. */
@@ -191,61 +309,189 @@ int main(int argc, char **argv)
                 memcpy( &my_ip, h_ent.h_addr_list[0], sizeof(my_ip) );
 
                 ((StartToken *)&token)->ip_array[machine_id-1] = my_ip;
+            } else if (machine_id == num_machines - 1) {
+                // Implicitly determined that already received start packet in a
+                // prior round by not satsifying condition in if block above.
+                token.type = 2;
             }
-            /* TODO: Update token seq, aru, etc. appropriately*/
-            int token_size = token.type == 1 ? 52 : 12 ;
-            /* TODO: Adjust size of token for retransmission requests*/
+            
+            /* Set initial token size (without rtr)*/
+            token_size = token.type == 1 ? 56 : 16 ;
+            
+            /* Set new token's rtr to precomputed new_rtr */
+            memcpy(token.rtr, new_rtr, new_rtr_itr * 4);
+            /* Adjust size for new rtr */
+            token_size += new_rtr_itr * 4;
+            
+            /* Set intended receiver. */
             token.recv = (machine_id%10) + 1;
-            if (uss == 0) {
+                    
+            /* Update aru value if appropriate */
+            int tmp_aru = token.aru;
+            if (token.seq == aru) {     // If token aru is equal to seq
+                token.aru = packet_id;    // Increment both equally
+                aru = packet_id;
+                lowered_aru = 0;
+            } else if (lowered_aru == 1 && prev_aru == token.aru) {
+                if(token.aru != aru) {  // If our aru has increased 
+                    token.aru = aru;    // Update aru
+                    lowered_aru = 0;
+                } // (Implicit else) keep lowered_aru set.
+            } else if (aru < token.aru) {
+                token.aru = aru;        // Lower token aru to local aru
+                lowered_aru = 1;
+            } else {
+                lowered_aru = 0;        // Do nothing, clear lowered flag
+            }
+            prev_aru = tmp_aru;
+           
+            /* Remember this token's seq number */
+            prev_recvd_seq = token.seq;
+            /* Set seq number to id of the last packet that will be sent */
+            token.seq = packet_id;
+              
+            /* Set done field if finished sending packets */
+            if (num_packets_sent >= num_packets && token.type == 2) {
+                /* If bursting will send last packet, set appropriate bit in 
+                 * done field.*/
+                token.done = token.done | 1 << (machine_id-1);
+            }
+            
+            /* Send token using appropriate socket */
+            if (send_addr_ucast.sin_addr.s_addr == 0) {
                 /* Multicast Token */  
                 sendto(ss, (char *)&token, token_size, 0, 
                     (struct sockaddr *)&send_addr, sizeof(send_addr) );
             } else {
                 /* Unicast Token */
                 sendto(uss, (char *)&token, token_size, 0, 
-                  (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast) );
-
+                  (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));
+                /* We send the token twice for higher likelihood of success. */
+                sendto(uss, (char *)&token, token_size, 0, 
+                  (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));
             }
 
-            /* Send rest of messages*/
-            while (burst_count < BURST_MSG) {
-                
+            /* Send rest (second half) of messages */
+            while (burst_count < packets_to_burst_itr) {
+                /* Multicast Message */  
+                sendto(ss, (char *)packets_to_burst[burst_count], sizeof(Message),
+                       0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
                 burst_count++;
             }
+            
+            /* Deliver (write) packets received by all */
+            if (tmp_prev_aru <= prev_aru) {
+                while (window[start_of_window % WINDOW_SIZE].type != -1 
+                    && window[start_of_window % WINDOW_SIZE].packet_id <= tmp_prev_aru) {
+                    /* Deliver window[start_of_window] */
+                    Message *tmp_msg = &(window[start_of_window % WINDOW_SIZE]);
+                    fprintf(fw, "%2d, %8d, %8d\n", tmp_msg->machine, 
+                        tmp_msg->packet_id, tmp_msg->rand);
+                    window[start_of_window % WINDOW_SIZE].type = -1;
+                    start_of_window++;
+                }
+                if (tmp_prev_aru == token.seq && prev_aru == token.seq
+                    && pow(2.0, (double)num_machines) - 1 == token.done) {
+                    /* If we believe everyone will deliver all messages, 
+                     * and everyone is done sending, burst last token */
+                    burst_count = 0;
+                    while (burst_count < 6) {   
+                         /* Multicast Message */  
+                         sendto(uss, (char *)&token, token_size,
+                            0, (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast) );
+                         burst_count++;
+                    }
+                }
+            }
+            
             /* Set has_token to zero because sent out token*/
             has_token = 0;
+            /* We now wait for the ack */
+            waiting_for_token_ack = 1;
         }
         /* Select: receive or timeout. */
         temp_mask = mask;
-        num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
+        num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (num > 0) {
             if ( FD_ISSET( sr, &temp_mask) ) {
-                /*  TODO: Check type of packet. If is token, set has_token to 1.*/
-            
-
+                /* Received multicasted packet. Can be message or StartToken */
+                /* Check type of packet. If is token, set has_token to 1.*/
+                bytes = recv_dbg(sr, mess_buf, MAX_PACKET_SIZE, 0);
+                 if (((Packet *)mess_buf)->type == 1 
+                     && ((Token *)mess_buf)->recv == machine_id
+                     && prev_recvd_seq < token.seq) {
+                     /* Received packet is a token */
+                     /* Use token if we have not received this token before. */
+                     /* Copy received token into local placeholder for token. */
+                     memcpy(&token, mess_buf, bytes);
+                     has_token = 1;
+                 } else if (((Packet *)mess_buf)->type == 3) {
+                     /* Check if is implicit token ack */
+                     Message *tmp_msg = (Message *)&mess_buf;
+                     if (tmp_msg->packet_id > packet_id) {
+                         waiting_for_token_ack = 0;
+                     }
+                     window[tmp_msg->packet_id % WINDOW_SIZE].type = tmp_msg->type;
+                     window[tmp_msg->packet_id % WINDOW_SIZE].packet_id = tmp_msg->packet_id;
+                     window[tmp_msg->packet_id % WINDOW_SIZE].machine = tmp_msg->machine;
+                     window[tmp_msg->packet_id % WINDOW_SIZE].rand = tmp_msg->rand;
+                 }
+            } else if ( FD_ISSET( usr, &temp_mask) ) {
+                /* Is unicasted packet */
+                bytes = recv_dbg(usr, mess_buf, MAX_PACKET_SIZE, 0);
+                if ((((Packet *)mess_buf)->type == 1 
+                    || ((Packet *)mess_buf)->type == 2)
+                    && prev_recvd_seq < token.seq) {
+                    /* Received packet is a token */
+                    /* Use token if we have not received this token before. */
+                    /* Copy received token into local placeholder for token. */
+                    memcpy(&token, mess_buf, bytes);
+                    has_token = 1;
+                } else if (((Packet *)mess_buf)->type == 4) {
+                    /* This is an ack packet. We are no longer waiting for it. */
+                    waiting_for_token_ack = 0;
+                }
             } else {
                 /* TIMEOUT*/
+                if (DEBUG == 1) {
+                    printf("Timeout\n");
+                }
+                /* Check if waiting_for_token_ack. If so, resend token*/
+                if (waiting_for_token_ack == 1) {
+                    /* Resend token */
+                    /* Send token using appropriate socket */
+                    if (uss == 0) {
+                        /* Multicast Token */  
+                        sendto(ss, (char *)&token, token_size, 0, 
+                            (struct sockaddr *)&send_addr, sizeof(send_addr) );
+                    } else {
+                        /* Unicast Token */
+                        sendto(uss, (char *)&token, token_size, 0, 
+                        (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));
+                    }
+                }
             }
         } 
     }
+    
+    if (fw != NULL) {
+        fclose(fw);
+        fw = NULL;
+    }
+
     return 0;
 }
 
 /*
  *  Initialize the unicast send sockets
  */
-struct sockaddr_in initUnicastSend(int* uss, int next_ip)
+struct sockaddr_in initUnicastSend(int next_ip)
 {
     struct sockaddr_in send_addr;
-
-    /* Socket on which to send */
-    *uss = socket(AF_INET, SOCK_DGRAM, 0); /* socket for sending (udp) */
-    if (*uss<0) {
-        perror("Ucast: socket");
-        exit(1);
-    }
 
     send_addr.sin_family = AF_INET;
     send_addr.sin_addr.s_addr = next_ip;
     send_addr.sin_port = htons(MCAST_PORT + 1);
+    
+    return send_addr;
 }
