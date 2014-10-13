@@ -199,6 +199,9 @@ int main(int argc, char **argv) {
      *  LOOP
      */ 
     for (;;) {
+        if (DEBUG) {
+            printf("enter infinite for loop: ");
+        }
         timeout.tv_sec = 0;
         timeout.tv_usec = TIMEOUT_USEC;
         
