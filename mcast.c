@@ -138,6 +138,13 @@ int main(int argc, char **argv) {
     {
         printf("Mcast: problem in setsockopt of multicast ttl %d", ttl_val );
     }
+    
+    u_char loop = 0;
+    if (setsockopt(ss, IPPROTO_IP, IP_MULTICAST_LOOP, (void *)&loop, 
+        sizeof(loop)) < 0) 
+    {
+        printf("Mcast: problem in setsockopt of multicast ttl %d", ttl_val );
+    }
 
     send_addr.sin_family = AF_INET;
     send_addr.sin_addr.s_addr = htonl(mcast_addr);  // Multicast address
@@ -236,6 +243,9 @@ int main(int argc, char **argv) {
                     rtr_itr++;
                 } else if (token.rtr[rtr_itr] == window[window_itr % WINDOW_SIZE].packet_id) {
                     if (packets_to_burst_itr < BURST_MSG) {
+                        if (DEBUG) {
+                            printf("Adding to packets_to_burst retransmission of packet id %d\n", window[window_itr % WINDOW_SIZE].packet_id);
+                        }
                         packets_to_burst[packets_to_burst_itr] = &(window[window_itr % WINDOW_SIZE]);
                         packets_to_burst_itr++;
                     } else {
@@ -274,6 +284,9 @@ int main(int argc, char **argv) {
                 window[packet_id % WINDOW_SIZE].machine = machine_id;
                 window[packet_id % WINDOW_SIZE].rand = random_number;
                 packets_to_burst[packets_to_burst_itr] = &(window[packet_id % WINDOW_SIZE]);
+                if(DEBUG) {
+                    printf("Adding new packet to packets_to_burst of id %d\n", packet_id);
+                }
                 num_packets_sent++;
                 packets_to_burst_itr++;
             }
@@ -382,8 +395,8 @@ int main(int argc, char **argv) {
                 sendto(uss, (char *)&token, token_size, 0, 
                   (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));
                 /* We send the token twice for higher likelihood of success. */
-                sendto(uss, (char *)&token, token_size, 0, 
-                  (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));
+                /*sendto(uss, (char *)&token, token_size, 0, 
+                  (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));*/
             }
 
             /* Send rest (second half) of messages */
