@@ -143,6 +143,10 @@ int main(int argc, char **argv) {
     send_addr.sin_addr.s_addr = htonl(mcast_addr);  // Multicast address
     send_addr.sin_port = htons(MCAST_PORT);
     
+    for (int idx = 0; idx < WINDOW_SIZE; idx++) {
+        window[idx].type = -1;
+    }
+
     int has_token = 0;
     Token token;
     if (machine_id == 1) {
@@ -351,7 +355,10 @@ int main(int argc, char **argv) {
             prev_recvd_seq = token.seq;
             /* Set seq number to id of the last packet that will be sent */
             token.seq = packet_id;
-              
+            if (DEBUG) {
+                printf("token to be sent has seq %d, prev_recvd_seq is now %d \n", token.seq, prev_recvd_seq);
+            }            
+  
             /* Set done field if finished sending packets */
             if (num_packets_sent >= num_packets && token.type == 2) {
                 /* If bursting will send last packet, set appropriate bit in 
