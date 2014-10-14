@@ -35,6 +35,7 @@ int main(int argc, char **argv) {
     int                waiting_for_token_ack = 0;
     int                aru = -1;
     int                prev_aru = INT_MAX;
+    int                prev_sent_aru = -1;
     int                lowered_aru = 0;
     int                start_of_window = 0;
     int                prev_recvd_seq = -1;
@@ -249,10 +250,11 @@ int main(int argc, char **argv) {
             int packets_to_burst_itr = 0;
             int window_itr = start_of_window;
             int rtr_itr = 0;
-            int rtr_size = token.type == 1 ? bytes - 56 : bytes - 16;
+            int rtr_size = (token.type == 1 ? bytes - 56 : bytes - 16)/sizeof(int);
             int new_rtr[MAX_PACKET_SIZE - 16];
             int new_rtr_itr = 0;
 
+            printf("rtr size: %d\n", rtr_size);
             while (rtr_itr < rtr_size && window_itr <= prev_recvd_seq) {
                 if (DEBUG) {
                     printf("Enter loop for creating new_rtr and packets_to_burst\n");
@@ -284,7 +286,7 @@ int main(int argc, char **argv) {
                     } else {
                         new_rtr[new_rtr_itr] = token.rtr[rtr_itr];
                         if (DEBUG) {
-                            printf("add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
+                            printf("when cannot add packet to packets_to_burst: add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
                         }
                         new_rtr_itr++;
                     }
@@ -401,35 +403,48 @@ int main(int argc, char **argv) {
             
             /* Set intended receiver. */
             token.recv = (machine_id%10) + 1;
-                    
+                   
+            if (DEBUG) {
+                printf("token.aru: %d, local aru: %d, prev_aru: %d, prev_sent_aru: %d\n", token.aru, aru, prev_aru, prev_sent_aru);
+            } 
             /* Update aru value if appropriate */
             int tmp_aru = token.aru;
-            if (token.seq == aru) {     // If token aru is equal to seq
+            if (aru < token.aru) {
+                if (DEBUG) {
+                    printf("local aru %d is lower than token.aru %d\n", aru, token.aru);
+                }
+                token.aru = aru;        // Lower token aru to local aru
+                lowered_aru = 1;
+            } else if (token.seq == token.aru) {     // If token aru is equal to seq
                 token.aru = packet_id;    // Increment both equally
                 aru = packet_id;
                 lowered_aru = 0;
                 if (DEBUG) {
-                    printf("token.seq == aru, %d\n", token.seq);
+                    printf("token.seq == aru, %d. Set token and local aru equal to largest packet_id sending this round.\n", token.seq);
                 }
-            } else if (lowered_aru == 1 && prev_aru == token.aru) {
+            } else if (lowered_aru == 1 && prev_sent_aru == token.aru) {
                 if(token.aru != aru) {  // If our aru has increased 
+                    if (DEBUG) {
+                        printf("lowered aru previous round, token aru remained same, local aru is larger, set token.aru %d to local aru %d\n", token.aru, aru);
+                    }
                     token.aru = aru;    // Update aru
                     lowered_aru = 0;
                 } // (Implicit else) keep lowered_aru set.
-            } else if (aru < token.aru) {
-                token.aru = aru;        // Lower token aru to local aru
-                lowered_aru = 1;
             } else {
+                if (DEBUG) {
+                    printf("do nothing with token.aru %d\n", token.aru);
+                }
                 lowered_aru = 0;        // Do nothing, clear lowered flag
             }
             prev_aru = tmp_aru;
+            prev_sent_aru = token.aru;
            
             /* Remember this token's seq number */
             prev_recvd_seq = token.seq;
             /* Set seq number to id of the last packet that will be sent */
             token.seq = packet_id;
             if (DEBUG) {
-                printf("token to be sent has seq %d, has aru %d, prev_recvd_seq is now %d \n", token.seq, aru, prev_recvd_seq);
+                printf("token to be sent has seq %d and aru %d, prev_recvd_seq is now %d \n", token.seq, token.aru, prev_recvd_seq);
             }            
   
             /* Set done field if finished sending packets */
