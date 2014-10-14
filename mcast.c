@@ -160,11 +160,12 @@ int main(int argc, char **argv) {
     Token token;
     if (machine_id == 1) {
         /* Set initial start token vals */
+        token.tok_id = -1;
         token.seq = -1;
         token.aru = -1;
         token.recv = 1;
         token.type = 1;
-        bytes = 56;
+        bytes = 60;
         has_token = 1;
         for (int idx = 0; idx < num_machines; idx++) {
             ((StartToken *)&token)->ip_array[idx] = 0;
@@ -250,8 +251,8 @@ int main(int argc, char **argv) {
             int packets_to_burst_itr = 0;
             int window_itr = start_of_window;
             int rtr_itr = 0;
-            int rtr_size = (token.type == 1 ? bytes - 56 : bytes - 16)/sizeof(int);
-            int new_rtr[MAX_PACKET_SIZE - 16];
+            int rtr_size = (token.type == 1 ? bytes - 60 : bytes - 20)/sizeof(int);
+            int new_rtr[MAX_PACKET_SIZE - 20];
             int new_rtr_itr = 0;
 
             printf("rtr size: %d\n", rtr_size);
@@ -393,8 +394,11 @@ int main(int argc, char **argv) {
                 token.type = 2;
             }
             
+            /* Increment token id */
+            token.tok_id++;
+
             /* Set initial token size (without rtr)*/
-            token_size = token.type == 1 ? 56 : 16 ;
+            token_size = token.type == 1 ? 60 : 20 ;
             
             /* Set new token's rtr to precomputed new_rtr */
             memcpy(token.rtr, new_rtr, new_rtr_itr * 4);
@@ -589,7 +593,7 @@ int main(int argc, char **argv) {
                 }               
                 if ((((Packet *)mess_buf)->type == 1 
                     || ((Packet *)mess_buf)->type == 2)
-                    && prev_recvd_seq < ((Token *)mess_buf)->seq) {
+                    && token.tok_id < ((Token *)mess_buf)->tok_id) {
                     if(DEBUG == 1) {
                          printf("received token with seq %d\n", ((Token *)mess_buf)->seq);
                     }
