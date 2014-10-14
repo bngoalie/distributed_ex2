@@ -161,11 +161,12 @@ int main(int argc, char **argv) {
     if (machine_id == 1) {
         /* Set initial start token vals */
         token.tok_id = -1;
+        token.done = 0;
         token.seq = -1;
         token.aru = -1;
         token.recv = 1;
         token.type = 1;
-        bytes = 60;
+        bytes = 64;
         has_token = 1;
         for (int idx = 0; idx < num_machines; idx++) {
             ((StartToken *)&token)->ip_array[idx] = 0;
@@ -251,8 +252,8 @@ int main(int argc, char **argv) {
             int packets_to_burst_itr = 0;
             int window_itr = start_of_window;
             int rtr_itr = 0;
-            int rtr_size = (token.type == 1 ? bytes - 60 : bytes - 20)/sizeof(int);
-            int new_rtr[MAX_PACKET_SIZE - 20];
+            int rtr_size = (token.type == 1 ? bytes - 64 : bytes - 24)/sizeof(int);
+            int new_rtr[MAX_PACKET_SIZE - 24];
             int new_rtr_itr = 0;
 
             printf("rtr size: %d\n", rtr_size);
@@ -398,7 +399,7 @@ int main(int argc, char **argv) {
             token.tok_id++;
 
             /* Set initial token size (without rtr)*/
-            token_size = token.type == 1 ? 60 : 20 ;
+            token_size = token.type == 1 ? 64 : 24 ;
             
             /* Set new token's rtr to precomputed new_rtr */
             memcpy(token.rtr, new_rtr, new_rtr_itr * 4);
@@ -466,7 +467,10 @@ int main(int argc, char **argv) {
             if (num_packets_sent >= num_packets && token.type == 2) {
                 /* If bursting will send last packet, set appropriate bit in 
                  * done field.*/
-                token.done = token.done | 1 << (machine_id-1);
+                if (DEBUG) {
+                    printf("old done: %d. or with %d. results: %d\n", token.done, (1 << (machine_id-1)), token.done | (1 << (machine_id-1)));
+                }
+                token.done = (token.done | (1 << (machine_id-1)));
             }
             
             /* Send token using appropriate socket */
@@ -516,16 +520,27 @@ int main(int argc, char **argv) {
                     window[start_of_window % WINDOW_SIZE].type = -1;
                     start_of_window++;
                 }
+                if (DEBUG) {
+                    printf("token.done: %d\n", token.done);
+                }
                 if (tmp_prev_aru == token.seq && prev_aru == token.seq
                     && pow(2.0, (double)num_machines) - 1 == token.done) {
                     /* If we believe everyone will deliver all messages, 
                      * and everyone is done sending, burst last token */
                     burst_count = 0;
+                    if (DEBUG) {
+                        printf("\t\t BURST END\n");
+                    }
                     while (burst_count < 6) {   
                          /* Multicast Message */  
                          sendto(uss, (char *)&token, token_size,
                             0, (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast) );
                          burst_count++;
+                         if (fw != NULL) {
+                             fclose(fw);
+                             fw = NULL;
+                             return 0;
+                         }
                     }
                 }
                 if (DEBUG) {
