@@ -5,6 +5,7 @@
 
 #define TIMEOUT_USEC 500
 #define DEBUG 1
+#define MAX_MACHINES 10
 
 struct sockaddr_in initUnicastSend(int);
 
@@ -62,6 +63,12 @@ int main(int argc, char **argv) {
     machine_id = atoi(argv[2]);             // Machine index
     num_machines = atoi(argv[3]);           // Number of machines
     loss_rate = atoi(argv[4]);              // Loss rate
+
+    /* Check number of machines */
+    if(num_machines > MAX_MACHINES) {
+        perror("mcast: arguments error - too many machines\n");
+        exit(0);
+    }
 
     /* Initialize recv_dbg with loss rate */
     recv_dbg_init(loss_rate, machine_id);
@@ -358,7 +365,7 @@ int main(int argc, char **argv) {
             }
 
             int burst_count = 0;
-            /*Send first half of packets*/
+            /*send first half of packets*/
             while (burst_count < packets_to_burst_itr/2) {
                 /* Multicast Message */  
                 sendto(ss, (char *)packets_to_burst[burst_count], sizeof(Message),
@@ -537,7 +544,7 @@ int main(int argc, char **argv) {
                     if (DEBUG) {
                         printf("\t\t BURST END\n");
                     }
-                    while (burst_count < 6) {   
+                    while (burst_count < 12) {   
                          /* Multicast Message */  
                          sendto(uss, (char *)&token, token_size,
                             0, (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast) );
