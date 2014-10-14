@@ -27,7 +27,7 @@ int main()
     send_addr.sin_port = htons(MCAST_PORT);
 
     Packet start;
-    start.type = 0;
+    start.type = 5;
 
     sendto(ss, (char *)&start, sizeof(Packet), 0, 
         (struct sockaddr *)&send_addr, sizeof(send_addr) );

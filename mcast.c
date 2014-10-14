@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
     int                token_size = 0;
     struct timeval     timeout;
     int                round = 0;
-
+    Packet             ack_packet;
     /* 
      *  INITIAL SETUP 
      */
@@ -156,11 +156,13 @@ int main(int argc, char **argv) {
         window[idx].type = -1;
     }
 
+    /* Set ack packet type */
+    ack_packet.type = 4;
+
     int has_token = 0;
     Token token;
     if (machine_id == 1) {
         /* Set initial start token vals */
-        token.tok_id = -1;
         token.done = 0;
         token.seq = -1;
         token.aru = -1;
@@ -172,6 +174,7 @@ int main(int argc, char **argv) {
             ((StartToken *)&token)->ip_array[idx] = 0;
         }
     }
+    token.tok_id = -1;
 
     /* Set masks for I/O Multiplexing */
     FD_ZERO( &mask );
@@ -191,7 +194,7 @@ int main(int argc, char **argv) {
             if ( FD_ISSET( sr, &temp_mask) ) {
                 recv( sr, mess_buf, sizeof(mess_buf), 0 );
                 start_packet = (Packet *)&mess_buf;
-                if (start_packet->type == 0) {  // Received start_mcast packet
+                if (start_packet->type == 5) {  // Received start_mcast packet
                     if (DEBUG) {
                         printf("BEGINNIG MULTICAST\n");
                     }
@@ -216,7 +219,9 @@ int main(int argc, char **argv) {
                 printf("At round %d\n", (++round));
                 printf("\tReceived token with type %d, seq %d, aru %d\n", token.type, token.seq, token.aru);
                 if (token.type == 1) {
+                   
                     printf("Token has IP addresses: ");
+                   
                     for (int idx = 0; idx < num_machines; idx++) {
                         printf("%d ", ((StartToken *)&token)->ip_array[idx]);
                     }
@@ -239,8 +244,7 @@ int main(int argc, char **argv) {
                 if(DEBUG) {
                     printf("Sending ack...\n");
                 }
-                int four = 4;
-                sendto(uss, (char *)&four, 4, 0, 
+                sendto(uss, (char *)&ack_packet, 32, 0, 
                     (struct sockaddr *)&send_addr_ucast_ack, sizeof(send_addr_ucast_ack));
             }
             
@@ -484,7 +488,7 @@ int main(int argc, char **argv) {
                     (struct sockaddr *)&send_addr, sizeof(send_addr) );
             } else {
                 if(DEBUG == 1) {
-                    printf("unicast token\n");
+                    printf("unicast token with type %d, seq %d, tok_id%d\n",token.type, token.seq, token.tok_id);
                 }
                 /* Unicast Token */
                 sendto(uss, (char *)&token, token_size, 0, 
@@ -563,73 +567,76 @@ int main(int argc, char **argv) {
                 /* Received multicasted packet. Can be message or StartToken */
                 /* Check type of packet. If is token, set has_token to 1.*/
                 bytes = recv_dbg(sr, mess_buf, MAX_PACKET_SIZE, 0);
-                if (DEBUG) {
-                    printf("received packet of type %d\n", ((Packet *)mess_buf)->type);
-                }
-                if (((Packet *)mess_buf)->type == 1 
-                     && ((Token *)mess_buf)->recv == machine_id
-                     && prev_recvd_seq < token.seq) {
-                     if(DEBUG == 1) {
-                         printf("received token\n");
-                     }
-                     /* Received packet is a token */
-                     /* Use token if we have not received this token before. */
-                     /* Copy received token into local placeholder for token. */
-                     memcpy(&token, mess_buf, bytes);
-                     has_token = 1;
-                 } else if (((Packet *)mess_buf)->type == 3) {
-                     /* Check if is implicit token ack */
-                     Message *tmp_msg = (Message *)&mess_buf;
-                     if(DEBUG == 1) {
-                         printf("received message of id %d\n", tmp_msg->packet_id);
-                     }
-                     if (tmp_msg->packet_id > packet_id) {
-                        if (DEBUG) {
-                            printf("received implicit ack\n");
-                        }   
-                        waiting_for_token_ack = 0;
-                     }
-                     if (tmp_msg->packet_id >= start_of_window) {
-                         window[tmp_msg->packet_id % WINDOW_SIZE].type = tmp_msg->type;
-                         window[tmp_msg->packet_id % WINDOW_SIZE].packet_id = tmp_msg->packet_id;
-                         window[tmp_msg->packet_id % WINDOW_SIZE].machine = tmp_msg->machine;
-                         window[tmp_msg->packet_id % WINDOW_SIZE].rand = tmp_msg->rand;
-                         /* update aru */
-                         /* While we have received the next packet_id above the current aru
-                          * increment the aru (set to that packet_id). */
-                         while (window[(aru+1) % WINDOW_SIZE].type != -1 
-                             && window[(aru+1) % WINDOW_SIZE].packet_id == aru+1) {
-                             aru++;
-                         }
+                if (bytes > 0) {
+                    if (DEBUG) {
+                        printf("received packet of type %d\n", ((Packet *)mess_buf)->type);
                     }
-                 }
+                    if (((Packet *)mess_buf)->type == 1 
+                         && ((Token *)mess_buf)->recv == machine_id
+                         && token.tok_id < ((Token *)mess_buf)->tok_id) {
+                         if(DEBUG == 1) {
+                             printf("received token\n");
+                         }
+                         /* Received packet is a<token */
+                         /* Use token if we have not received this token before. */
+                         /* Copy received token into local placeholder for token. */
+                         memcpy(&token, mess_buf, bytes);
+                         has_token = 1;
+                     } else if (((Packet *)mess_buf)->type == 3) {
+                         /* Check if is implicit token ack */
+                         Message *tmp_msg = (Message *)&mess_buf;
+                         if(DEBUG == 1) {
+                             printf("received message of id %d\n", tmp_msg->packet_id);
+                         }
+                         if (tmp_msg->packet_id > packet_id) {
+                            if (DEBUG) {
+                                printf("received implicit ack\n");
+                            }   
+                            waiting_for_token_ack = 0;
+                         }
+                         if (tmp_msg->packet_id >= start_of_window) {
+                             window[tmp_msg->packet_id % WINDOW_SIZE].type = tmp_msg->type;
+                             window[tmp_msg->packet_id % WINDOW_SIZE].packet_id = tmp_msg->packet_id;
+                             window[tmp_msg->packet_id % WINDOW_SIZE].machine = tmp_msg->machine;
+                             window[tmp_msg->packet_id % WINDOW_SIZE].rand = tmp_msg->rand;
+                             /* update aru */
+                             /* While we have received the next packet_id above the current aru
+                              * increment the aru (set to that packet_id). */
+                             while (window[(aru+1) % WINDOW_SIZE].type != -1 
+                                 && window[(aru+1) % WINDOW_SIZE].packet_id == aru+1) {
+                                 aru++;
+                             }
+                        }
+                    }
+                }
             } else if ( FD_ISSET( usr, &temp_mask) ) {
-
                 /* Is unicasted packet */
                 bytes = recv_dbg(usr, mess_buf, MAX_PACKET_SIZE, 0);
-                if (DEBUG) {
-                    printf("received unicast packet of type %d\n", ((Packet *)mess_buf)->type);
-                }               
-                if ((((Packet *)mess_buf)->type == 1 
-                    || ((Packet *)mess_buf)->type == 2)
-                    && token.tok_id < ((Token *)mess_buf)->tok_id) {
-                    if(DEBUG == 1) {
-                         printf("received token with seq %d\n", ((Token *)mess_buf)->seq);
-                    }
-                    /* Received packet is a token */
-                    /* Use token if we have not received this token before. */
-                    /* Copy received token into local placeholder for token. */
-                    memcpy(&token, mess_buf, bytes);
-                    has_token = 1;
-                } else if (((Packet *)mess_buf)->type == 4) {
-                    /* This is an ack packet. We are no longer waiting for it. */
+                if (bytes > 0) {
                     if (DEBUG) {
-                        printf("received explicit ack\n");
+                        printf("received unicast packet of type %d\n", ((Packet *)mess_buf)->type);
+                    }               
+                    if ((((Packet *)mess_buf)->type == 1 
+                        || ((Packet *)mess_buf)->type == 2)
+                        && token.tok_id < ((Token *)mess_buf)->tok_id) {
+                        if(DEBUG == 1) {
+                             printf("received token with seq %d\n", ((Token *)mess_buf)->seq);
+                        }
+                        /* Received packet is a token */
+                        /* Use token if we have not received this token before. */
+                        /* Copy received token into local placeholder for token. */
+                        memcpy(&token, mess_buf, bytes);
+                        has_token = 1;
+                    } else if (((Packet *)mess_buf)->type == 4) {
+                        /* This is an ack packet. We are no longer waiting for it. */
+                        if (DEBUG) {
+                            printf("received explicit ack\n");
+                        }
+                        waiting_for_token_ack = 0;
                     }
-                    waiting_for_token_ack = 0;
                 }
             } 
-        } else {
+        } else  {
             /* TIMEOUT*/
             if (DEBUG == 1) {
                 printf("Timeout\n");
