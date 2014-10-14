@@ -336,13 +336,9 @@ int main(int argc, char **argv) {
                     && num_packets_sent+1 <= num_packets
                     && window[(packet_id+1) % WINDOW_SIZE].type == -1) {
                 packet_id++;
-                /*if (packet_id == 0) {
-                   */ /* If going to send first packetk, need to update local aru appropriately.*/
-                    /*aru = BURST_MSG - packets_to_burst_itr - 1;
-                    if (DEBUG) {
-                       printf("aru now %d\n", aru); 
-                    }
-                }*/
+                if (packet_id == aru + 1){
+                    aru++;
+                }
                  /* This is not a truly uniform distribution of random numbers */
                 random_number = (rand() % RAND_RANGE_MAX) + 1;
                 window[packet_id % WINDOW_SIZE].type = 3;
@@ -423,7 +419,7 @@ int main(int argc, char **argv) {
             if (DEBUG)
                 printf("\tlowered_aru: %d\n", lowered_aru);
 
-            if (token.aru != prev_sent_aru)
+            if (token.aru != prev_sent_aru) // If somebody else changed (lowered) the aru, clear local lowered flag
                 lowered_aru = 0;
 
             if (aru < token.aru) {      // Local aru is less than token aru
@@ -447,10 +443,10 @@ int main(int argc, char **argv) {
                     token.aru = aru;    // Update aru
                     //lowered_aru = 0; WE DON'T DO THIS BECAUSE WE MIGHT NEED TO KEEP RAISING IT
                 } // (Implicit else) keep lowered_aru set.
-            } else if (token.aru > prev_sent_aru && aru > token.aru) {  // If somebody else raised the aru, but local aru
+            } /*else if (token.aru > prev_sent_aru && aru > token.aru) {  // If somebody else raised the aru, but local aru
                 token.aru = aru;                                        // is still higher, set token aru to local aru
                 lowered_aru = 0;
-            }
+            }*/
             else {
                 if (DEBUG) {
                     printf("\tdo nothing with token.aru %d\n", token.aru);
@@ -642,7 +638,7 @@ int main(int argc, char **argv) {
             if (waiting_for_token_ack == 1) {
                 /* Resend token */
                 /* Send token using appropriate socket */
-                if (uss == 0) {
+                if (send_addr_ucast.sin_addr.s_addr == 0) {
                     /* Multicast Token */  
                     sendto(ss, (char *)&token, token_size, 0, 
                         (struct sockaddr *)&send_addr, sizeof(send_addr) );
