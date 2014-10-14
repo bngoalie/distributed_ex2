@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
         if (has_token == 1) {
             if(DEBUG == 1) {
                 printf("at round %d\n", (++round));
-                printf("Has token, type %d, seq %d, aru %d\n", token.type, token.seq, token.aru);
+                printf("\tHas token, type %d, seq %d, aru %d\n", token.type, token.seq, token.aru);
                 if (token.type == 1) {
                     printf("tokens have ip addresses: ");
                     for (int idx = 0; idx < num_machines; idx++) {
@@ -327,7 +327,7 @@ int main(int argc, char **argv) {
             packet_id = token.seq;
             while (packets_to_burst_itr < BURST_MSG 
                     && num_packets_sent+1 <= num_packets
-                    && window[packet_id+1].type == -1) {
+                    && window[(packet_id+1) % WINDOW_SIZE].type == -1) {
                 packet_id++;
                 /*if (packet_id == 0) {
                    */ /* If going to send first packetk, need to update local aru appropriately.*/
@@ -405,34 +405,45 @@ int main(int argc, char **argv) {
             token.recv = (machine_id%10) + 1;
                    
             if (DEBUG) {
-                printf("token.aru: %d, local aru: %d, prev_aru: %d, prev_sent_aru: %d\n", token.aru, aru, prev_aru, prev_sent_aru);
+                printf("\ttoken.aru: %d, local aru: %d, prev_aru: %d, prev_sent_aru: %d\n", token.aru, aru, prev_aru, prev_sent_aru);
             } 
             /* Update aru value if appropriate */
             int tmp_aru = token.aru;
-            if (aru < token.aru) {
+            
+            if (DEBUG)
+                printf("\tlowered_aru: %d\n", lowered_aru);
+
+            if (token.aru != prev_sent_aru)
+                lowered_aru = 0;
+
+            if (aru < token.aru) {      // Local aru is less than token aru
                 if (DEBUG) {
-                    printf("local aru %d is lower than token.aru %d\n", aru, token.aru);
+                    printf("\tlocal aru %d is lower than token.aru %d\n", aru, token.aru);
                 }
                 token.aru = aru;        // Lower token aru to local aru
                 lowered_aru = 1;
-            } else if (token.seq == token.aru) {     // If token aru is equal to seq
-                token.aru = packet_id;    // Increment both equally
+            } else if (token.seq == token.aru) {    // Token aru is equal to seq
+                token.aru = packet_id;              // Increment both equally
                 aru = packet_id;
                 lowered_aru = 0;
                 if (DEBUG) {
-                    printf("token.seq == aru, %d. Set token and local aru equal to largest packet_id sending this round.\n", token.seq);
+                    printf("\ttoken.seq == aru, %d. Set token and local aru equal to largest packet_id sending this round.\n", token.seq);
                 }
             } else if (lowered_aru == 1 && prev_sent_aru == token.aru) {
                 if(token.aru != aru) {  // If our aru has increased 
                     if (DEBUG) {
-                        printf("lowered aru previous round, token aru remained same, local aru is larger, set token.aru %d to local aru %d\n", token.aru, aru);
+                        printf("\tlowered aru previous round, token aru remained same, local aru is larger, set token.aru %d to local aru %d\n", token.aru, aru);
                     }
                     token.aru = aru;    // Update aru
-                    lowered_aru = 0;
+                    //lowered_aru = 0; WE DON'T DO THIS BECAUSE WE MIGHT NEED TO KEEP RAISING IT
                 } // (Implicit else) keep lowered_aru set.
-            } else {
+            } else if (token.aru > prev_sent_aru && aru > token.aru) {  // If somebody else raised the aru, but local aru
+                token.aru = aru;                                        // is still higher, set token aru to local aru
+                lowered_aru = 0;
+            }
+            else {
                 if (DEBUG) {
-                    printf("do nothing with token.aru %d\n", token.aru);
+                    printf("\tdo nothing with token.aru %d\n", token.aru);
                 }
                 lowered_aru = 0;        // Do nothing, clear lowered flag
             }
@@ -444,7 +455,7 @@ int main(int argc, char **argv) {
             /* Set seq number to id of the last packet that will be sent */
             token.seq = packet_id;
             if (DEBUG) {
-                printf("token to be sent has seq %d and aru %d, prev_recvd_seq is now %d \n", token.seq, token.aru, prev_recvd_seq);
+                printf("\ttoken to be sent has seq %d and aru %d, prev_recvd_seq is now %d \n", token.seq, token.aru, prev_recvd_seq);
             }            
   
             /* Set done field if finished sending packets */
