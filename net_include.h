@@ -13,11 +13,11 @@
 #define MCAST_PORT	    10010
 #define UNICAST_PORT    10011
 #define MCAST_IP        225 << 24 | 1 << 16 | 2 << 8 | 101; /* (255.1.2.101)  */
-#define BURST_MSG       30
+#define BURST_MSG       40
 #define WINDOW_SIZE     1500
 #define MAX_PACKET_SIZE WINDOW_SIZE * 4 + 16
 #define PAYLOAD_SIZE    1200
-#define TOKEN_BURST     2
+#define TOKEN_BURST     3
 #define RAND_RANGE_MAX  1000000
 #define TIMEOUT_USEC    100
 #define DEBUG           0
