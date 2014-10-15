@@ -491,18 +491,19 @@ int main(int argc, char **argv) {
                 if(DEBUG == 1) {
                     printf("multicast token\n");
                 }
-                sendto(ss, (char *)&token, token_size, 0, 
-                    (struct sockaddr *)&send_addr, sizeof(send_addr) );
+                for (int x = 0; x < TOKEN_BURST; x++) {
+                    sendto(ss, (char *)&token, token_size, 0, 
+                        (struct sockaddr *)&send_addr, sizeof(send_addr) );
+                }
             } else {
                 if(DEBUG == 1) {
                     printf("unicast token with type %d, seq %d, tok_id%d\n",token.type, token.seq, token.tok_id);
                 }
                 /* Unicast Token */
-                sendto(uss, (char *)&token, token_size, 0, 
-                  (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));
-                /* We send the token twice for higher likelihood of success. */
-                /*sendto(uss, (char *)&token, token_size, 0, 
-                  (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));*/
+                for (int x = 0; x < TOKEN_BURST; x++) {
+                    sendto(uss, (char *)&token, token_size, 0, 
+                      (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast));
+                }
             }
 
             /* Send rest (second half) of messages */

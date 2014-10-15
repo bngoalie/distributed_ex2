@@ -17,7 +17,7 @@
 #define WINDOW_SIZE     1500
 #define MAX_PACKET_SIZE WINDOW_SIZE * 4 + 16
 #define PAYLOAD_SIZE    1200
-#define BURST_TOKEN     2
+#define TOKEN_BURST     2
 #define RAND_RANGE_MAX  1000000
 
 /* Packet types:
