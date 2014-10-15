@@ -63,5 +63,5 @@ typedef struct {
     int         machine;
     int         packet_id;
     int         rand;
-    int         payload[PAYLOAD_SIZE];
+    char        payload[PAYLOAD_SIZE];
 } Message;
