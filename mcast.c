@@ -3,10 +3,6 @@
 #include <math.h>
 #include <limits.h>
 
-#define TIMEOUT_USEC 100
-#define DEBUG 0
-#define MAX_MACHINES 10
-
 struct sockaddr_in initUnicastSend(int);
 
 int main(int argc, char **argv) {

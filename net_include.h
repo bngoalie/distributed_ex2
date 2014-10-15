@@ -19,6 +19,9 @@
 #define PAYLOAD_SIZE    1200
 #define TOKEN_BURST     2
 #define RAND_RANGE_MAX  1000000
+#define TIMEOUT_USEC    100
+#define DEBUG           0
+#define MAX_MACHINES    10
 
 /* Packet types:
  * 0:   Start multicast
