@@ -13,12 +13,12 @@
 #define MCAST_PORT	    10010
 #define UNICAST_PORT    10011
 #define MCAST_IP        225 << 24 | 1 << 16 | 2 << 8 | 101; /* (255.1.2.101)  */
-#define BURST_MSG       20
+#define BURST_MSG       40
 #define WINDOW_SIZE     1500
 #define MAX_PACKET_SIZE WINDOW_SIZE * 4 + 16
 #define PAYLOAD_SIZE    1200
-#define BURST_TOKEN     2
-#define RAND_RANGE_MAX        1000000
+#define TOKEN_BURST     2
+#define RAND_RANGE_MAX  1000000
 
 /* Packet types:
  * 0:   Start multicast
@@ -37,21 +37,24 @@ typedef struct {
 /* StartToken: Struct for starting token */
 typedef struct {
     int         type;
+    int         tok_id;
     int         seq;
     int         aru;
     int         recv;
+    int         done;
     int         ip_array[10];   // Max 10 machines
-    int         rtr[MAX_PACKET_SIZE - 56];
+    int         rtr[MAX_PACKET_SIZE - 64];
 } StartToken;
 
 /* Token: Struct for standard unicasted token */
 typedef struct {
     int         type;
+    int         tok_id;
     int         seq;
     int         aru;
     int         recv;
     int         done; // Use bitmasks
-    int         rtr[MAX_PACKET_SIZE - 16];
+    int         rtr[MAX_PACKET_SIZE - 24];
 } Token;
 
 /* Message: Struct for multicasted message */
@@ -60,5 +63,5 @@ typedef struct {
     int         machine;
     int         packet_id;
     int         rand;
-    int         payload[PAYLOAD_SIZE];
+    char        payload[PAYLOAD_SIZE];
 } Message;
