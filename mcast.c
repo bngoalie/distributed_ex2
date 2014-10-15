@@ -4,7 +4,7 @@
 #include <limits.h>
 
 #define TIMEOUT_USEC 100
-#define DEBUG 1
+#define DEBUG 0
 #define MAX_MACHINES 10
 
 struct sockaddr_in initUnicastSend(int);
@@ -422,7 +422,7 @@ int main(int argc, char **argv) {
                     printf("set this machines index in token ip_array to %d\n", my_ip);
                 }
                 ((StartToken *)&token)->ip_array[machine_id-1] = my_ip;
-            } else if (round == 2 && machine_id == num_machines - 1) {
+            } else if (machine_id == num_machines - 1) {
                 // Implicitly determined that already received start packet in a
                 // prior round by not satsifying condition in if block above.
                 token.type = 2;
