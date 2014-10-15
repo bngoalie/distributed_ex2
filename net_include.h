@@ -13,7 +13,7 @@
 #define MCAST_PORT	    10010
 #define UNICAST_PORT    10011
 #define MCAST_IP        225 << 24 | 1 << 16 | 2 << 8 | 101; /* (255.1.2.101)  */
-#define BURST_MSG       20
+#define BURST_MSG       40
 #define WINDOW_SIZE     1500
 #define MAX_PACKET_SIZE WINDOW_SIZE * 4 + 16
 #define PAYLOAD_SIZE    1200

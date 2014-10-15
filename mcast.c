@@ -3,8 +3,8 @@
 #include <math.h>
 #include <limits.h>
 
-#define TIMEOUT_USEC 500
-#define DEBUG 1
+#define TIMEOUT_USEC 100
+#define DEBUG 0
 #define MAX_MACHINES 10
 
 struct sockaddr_in initUnicastSend(int);
@@ -266,8 +266,10 @@ int main(int argc, char **argv) {
             int rtr_size = (token.type == 1 ? bytes - 64 : bytes - 24)/sizeof(int);
             int new_rtr[MAX_PACKET_SIZE - 24];
             int new_rtr_itr = 0;
-
+            
+            if(DEBUG) {
             printf("rtr size: %d, window_itr start value: %d, prev_recvd_seq: %d\n", rtr_size, window_itr, prev_recvd_seq);
+            }
             while (rtr_itr < rtr_size && window_itr <= prev_recvd_seq) {
                 if (DEBUG) {
                     //printf("Enter loop for creating new_rtr and packets_to_burst\n");
