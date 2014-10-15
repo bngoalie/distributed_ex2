@@ -45,6 +45,7 @@ int main(int argc, char **argv) {
     int                token_size = 0;
     struct timeval     timeout;
     int                round = 0;
+    struct timeval     start_time;    
 
     /* 
      *  INITIAL SETUP 
@@ -193,6 +194,7 @@ int main(int argc, char **argv) {
                     if (DEBUG) {
                         printf("BEGINNIG MULTICAST\n");
                     }
+                    gettimeofday(&start_time, 0); 
                     waiting = 0;
                 }
             }
