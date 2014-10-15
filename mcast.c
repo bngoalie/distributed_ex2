@@ -270,7 +270,11 @@ int main(int argc, char **argv) {
             int rtr_size = (token.type == 1 ? bytes - 64 : bytes - 24)/sizeof(int);
             int new_rtr[MAX_PACKET_SIZE - 24];
             int new_rtr_itr = 0;
-            
+            int *token_rtr = token.rtr;
+            if (token.type == 1) {
+                token_rtr = ((StartToken *)&token)->rtr;
+            }
+ 
             if(DEBUG) {
             printf("rtr size: %d, window_itr start value: %d, prev_recvd_seq: %d\n", rtr_size, window_itr, prev_recvd_seq);
             }
@@ -283,19 +287,19 @@ int main(int argc, char **argv) {
                     if (DEBUG) {
                         printf("window missing id: add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
                     }
-                    if (token.rtr[rtr_itr] == window_itr) {
+                    if (token_rtr[rtr_itr] == window_itr) {
                         rtr_itr++;
                     }
                     window_itr++;
                     new_rtr_itr++;
-                } else if (token.rtr[rtr_itr] < window[window_itr % WINDOW_SIZE].packet_id) {
-                    new_rtr[new_rtr_itr] = token.rtr[rtr_itr];
+                } else if (token_rtr[rtr_itr] < window[window_itr % WINDOW_SIZE].packet_id) {
+                    new_rtr[new_rtr_itr] = token_rtr[rtr_itr];
                     if (DEBUG) {
                         printf("add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
                     }
                     new_rtr_itr++;
                     rtr_itr++;
-                } else if (token.rtr[rtr_itr] == window[window_itr % WINDOW_SIZE].packet_id) {
+                } else if (token_rtr[rtr_itr] == window[window_itr % WINDOW_SIZE].packet_id) {
                     if (packets_to_burst_itr < BURST_MSG) {
                         if (DEBUG) {
                             printf("Adding to packets_to_burst retransmission of packet id %d\n", window[window_itr % WINDOW_SIZE].packet_id);
@@ -303,7 +307,7 @@ int main(int argc, char **argv) {
                         packets_to_burst[packets_to_burst_itr] = &(window[window_itr % WINDOW_SIZE]);
                         packets_to_burst_itr++;
                     } else {
-                        new_rtr[new_rtr_itr] = token.rtr[rtr_itr];
+                        new_rtr[new_rtr_itr] = token_rtr[rtr_itr];
                         if (DEBUG) {
                             printf("Cannot add packet to packets_to_burst; add to new_rtr (id %d)\n", new_rtr[new_rtr_itr]);
                         }
@@ -318,9 +322,12 @@ int main(int argc, char **argv) {
                     window_itr++;
                 }
             }
+            if (DEBUG) {
+                printf("done with combined while loop, rtr_itr: %d, new_rtr_itr: %d, window_itr: %d\n", rtr_itr, new_rtr_itr, window_itr);
+            }
             
             while (rtr_itr < rtr_size) {
-                new_rtr[new_rtr_itr] = token.rtr[rtr_itr];
+                new_rtr[new_rtr_itr] = token_rtr[rtr_itr];
                 if (DEBUG) {
                     printf("Adding to new_rtr (id %d)\n", new_rtr[new_rtr_itr]);
                 }
@@ -411,9 +418,11 @@ int main(int argc, char **argv) {
 
                 memcpy( &h_ent, p_h_ent, sizeof(h_ent));
                 memcpy( &my_ip, h_ent.h_addr_list[0], sizeof(my_ip) );
-
+                if (DEBUG) {
+                    printf("set this machines index in token ip_array to %d\n", my_ip);
+                }
                 ((StartToken *)&token)->ip_array[machine_id-1] = my_ip;
-            } else if (machine_id == num_machines - 1) {
+            } else if (round == 2 && machine_id == num_machines - 1) {
                 // Implicitly determined that already received start packet in a
                 // prior round by not satsifying condition in if block above.
                 token.type = 2;
@@ -426,7 +435,11 @@ int main(int argc, char **argv) {
             token_size = token.type == 1 ? 64 : 24 ;
             
             /* Set new token's rtr to precomputed new_rtr */
-            memcpy(token.rtr, new_rtr, new_rtr_itr * 4);
+            if (token.type == 1) {
+                memcpy(((StartToken *)&token)->rtr, new_rtr, new_rtr_itr * 4);
+            } else {
+                memcpy(token.rtr, new_rtr, new_rtr_itr * 4);
+            }
             /* Adjust size for new rtr */
             token_size += new_rtr_itr * 4;
             
@@ -453,7 +466,7 @@ int main(int argc, char **argv) {
                 lowered_aru = 1;
             } else if (token.seq == token.aru) {    // Token aru is equal to seq
                 token.aru = packet_id;              // Increment both equally
-                aru = packet_id;
+                /*aru = packet_id;*/
                 lowered_aru = 0;
                 if (DEBUG) {
                     printf("\ttoken.seq == aru, %d. Set token and local aru equal to largest packet_id sending this round.\n", token.seq);
@@ -515,6 +528,9 @@ int main(int argc, char **argv) {
                           (send_ip & 0x00ff0000)>>16,
                           (send_ip & 0x0000ff00)>>8,
                           (send_ip & 0x000000ff) );
+                    if (token.type == 1) {
+                        printf("token ip_array has value %d for this machine\n", ((StartToken *)&token)->ip_array[machine_id-1]);
+                    }
 
                 }
                 /* Unicast Token */
