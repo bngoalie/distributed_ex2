@@ -4,7 +4,7 @@
 #include <limits.h>
 
 #define TIMEOUT_USEC 100
-#define DEBUG 0
+#define DEBUG 1
 #define MAX_MACHINES 10
 
 struct sockaddr_in initUnicastSend(int);
@@ -380,10 +380,16 @@ int main(int argc, char **argv) {
             } 
             /* If token is a StartToken and this machine has yet to establish 
              * who to unicast to. */
+            if (DEBUG)
+                printf("IP address debug: Current send addr = %d, token type = %d, ip array val = %d\n",
+                            send_addr_ucast.sin_addr.s_addr, token.type,
+                            ((StartToken *)&token)->ip_array[machine_id % num_machines]);
             if (send_addr_ucast.sin_addr.s_addr == 0 && token.type == 1  
                 && ((StartToken *)&token)->ip_array[machine_id % num_machines] != 0) {
                 send_addr_ucast = initUnicastSend(
                     ((StartToken *)&token)->ip_array[machine_id % num_machines]);
+                if (DEBUG)
+                    printf("Set target unicast IP address to %d\n", send_addr_ucast.sin_addr.s_addr);
             }
             
             /* If the StartToken being passed around has yet to establish this 
@@ -503,7 +509,13 @@ int main(int argc, char **argv) {
                 }
             } else {
                 if(DEBUG == 1) {
+                    int send_ip = send_addr_ucast.sin_addr.s_addr;
                     printf("unicast token with type %d, seq %d, tok_id%d\n",token.type, token.seq, token.tok_id);
+                    printf("Target IP address is: %d.%d.%d.%d\n", (send_ip & 0xff000000) >>24,
+                          (send_ip & 0x00ff0000)>>16,
+                          (send_ip & 0x0000ff00)>>8,
+                          (send_ip & 0x000000ff) );
+
                 }
                 /* Unicast Token */
                 for (int x = 0; x < TOKEN_BURST; x++) {
@@ -588,7 +600,10 @@ int main(int argc, char **argv) {
                 bytes = recv_dbg(sr, mess_buf, MAX_PACKET_SIZE, 0);
                 if (bytes > 0) {
                     if (DEBUG) {
-                        printf("received packet of type %d\n", ((Packet *)mess_buf)->type);
+                        printf("received multicast packet of type %d\n", ((Packet *)mess_buf)->type);
+                        if (((Packet *)mess_buf)->type == 1) {
+                            printf("Token id: %d\n", ((Token *)mess_buf)->tok_id);
+                        }
                     }
                     if (((Packet *)mess_buf)->type == 1 
                          && ((Token *)mess_buf)->recv == machine_id
@@ -634,6 +649,9 @@ int main(int argc, char **argv) {
                 if (bytes > 0) {
                     if (DEBUG) {
                         printf("received unicast packet of type %d\n", ((Packet *)mess_buf)->type);
+                        if ((((Packet *)mess_buf)->type == 1) || (((Packet *)mess_buf)->type == 2)) {
+                            printf("Token id: %d\n", ((Token *)mess_buf)->tok_id);
+                        }
                     }               
                     if ((((Packet *)mess_buf)->type == 1 
                         || ((Packet *)mess_buf)->type == 2)
@@ -663,6 +681,8 @@ int main(int argc, char **argv) {
             /* Check if waiting_for_token_ack. If so, resend token*/
             if (waiting_for_token_ack == 1) {
                 /* Resend token */
+                if (DEBUG)
+                    printf("Retransmitting token with ID %d\n", token.tok_id);
                 /* Send token using appropriate socket */
                 if (send_addr_ucast.sin_addr.s_addr == 0) {
                     /* Multicast Token */  
