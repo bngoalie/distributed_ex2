@@ -7,7 +7,7 @@ struct sockaddr_in initUnicastSend(int);
 
 int main(int argc, char **argv) {
     /*
-     *  DECLARATIONS
+     *  Declarations
      */
     struct sockaddr_in name;
     struct sockaddr_in send_addr;
@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
     Packet             ack_packet;
     
     /* 
-     *  INITIAL SETUP 
+     *  Initial program setup
      */
 
     /* Need four arguements: number of packets, machine index, 
@@ -120,11 +120,13 @@ int main(int argc, char **argv) {
     name.sin_addr.s_addr = INADDR_ANY;
     name.sin_port = htons(MCAST_PORT);
 
+    /* Bind to receiving socket */
     if ( bind( sr, (struct sockaddr *)&name, sizeof(name) ) < 0 ) {
         perror("Mcast: bind");
         exit(1);
     }
 
+    /* Join multicast group */
     mreq.imr_multiaddr.s_addr = htonl( mcast_addr );
     mreq.imr_interface.s_addr = htonl( INADDR_ANY );
 
@@ -134,7 +136,8 @@ int main(int argc, char **argv) {
         perror("Mcast: problem in setsockopt to join multicast address" );
     }
 
-    ss = socket(AF_INET, SOCK_DGRAM, 0);    // Socket for sending
+    /* Set up sending socket */
+    ss = socket(AF_INET, SOCK_DGRAM, 0);
     if (ss<0) {
         perror("Mcast: socket");
         exit(1);
@@ -165,10 +168,10 @@ int main(int argc, char **argv) {
     /* Set ack packet type */
     ack_packet.type = 4;
 
+    /* Set up initial token values */
     int has_token = 0;
     Token token;
     if (machine_id == 1) {
-        /* Set initial start token vals */
         token.done = 0;
         token.seq = -1;
         token.aru = -1;
@@ -191,7 +194,7 @@ int main(int argc, char **argv) {
     int waiting = 1;
 
     /*
-     *  WAIT TO BEGIN
+     *  Wait for the start_mcast packet
      */ 
     while (waiting == 1) {
         temp_mask = mask;
@@ -211,16 +214,19 @@ int main(int argc, char **argv) {
         }
     }
 
+    // --------------------------------------------------------------------------------------------//
+
     /*
-     *  LOOP
+     *  Main loop
      */ 
     for (;;) {
         if (DEBUG) {
             printf("Entering main loop (infinite):\n");
         }
         timeout.tv_sec = 0;
-        timeout.tv_usec = TIMEOUT_USEC;
+        timeout.tv_usec = TIMEOUT_USEC; // set timeout
         
+        /* If we've received a new token, process it */
         if (has_token == 1) {
             if(DEBUG == 1) {
                 printf("At round %d\n", (++round));
@@ -228,11 +234,12 @@ int main(int argc, char **argv) {
                 if (token.type == 1) {
                    
                     printf("Token has IP addresses: ");
-                   
                     for (int idx = 0; idx < num_machines; idx++) {
                         printf("%d ", ((StartToken *)&token)->ip_array[idx]);
                     }
-                    printf("\nmachine to ack is at index %d and has ip address %d\n", (machine_id-2+num_machines)%num_machines, ((StartToken *)&token)->ip_array[(machine_id - 2 + num_machines) % num_machines]);
+                    printf("\nmachine to ack is at index %d and has ip address %d\n", 
+                        (machine_id-2+num_machines)%num_machines, 
+                        ((StartToken *)&token)->ip_array[(machine_id - 2 + num_machines) % num_machines]);
                 }
             }
             if (send_addr_ucast_ack.sin_addr.s_addr == 0 && token.type == 1  
@@ -254,12 +261,11 @@ int main(int argc, char **argv) {
                 sendto(uss, (char *)&ack_packet, 32, 0, 
                     (struct sockaddr *)&send_addr_ucast_ack, sizeof(send_addr_ucast_ack));
             }
-            
-            int tmp_prev_aru = prev_sent_aru;
                
             /* Check rtr for packets machine is holding. If have packet, add 
              * to array of packets to send in burst. */
             Message *packets_to_burst[BURST_MSG];
+            int tmp_prev_aru = prev_sent_aru;
             int packets_to_burst_itr = 0;
             int window_itr = start_of_window;
             int rtr_itr = 0;
@@ -270,58 +276,59 @@ int main(int argc, char **argv) {
             if (token.type == 1) {
                 token_rtr = ((StartToken *)&token)->rtr;
             }
- 
+            
+            /*
+             * Iterate through the window and the retransmission request array to create 
+             * a new retransmission request array and an array of messages to burst:
+             */ 
             if(DEBUG) {
             printf("rtr size: %d, window_itr start value: %d, prev_recvd_seq: %d\n", rtr_size, window_itr, prev_recvd_seq);
             }
             while (rtr_itr < rtr_size && window_itr <= prev_recvd_seq) {
-                if (DEBUG) {
-                    //printf("Enter loop for creating new_rtr and packets_to_burst\n");
-                }
-                if (window[window_itr % WINDOW_SIZE].type == -1) {
-                    new_rtr[new_rtr_itr] = window_itr;
+                if (window[window_itr % WINDOW_SIZE].type == -1) {  // expected packet is missing from window
+                    new_rtr[new_rtr_itr] = window_itr;              // add retransmission request
                     if (DEBUG) {
                         printf("window missing id: add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
                     }
-                    if (token_rtr[rtr_itr] == window_itr) {
-                        rtr_itr++;
+                    if (token_rtr[rtr_itr] == window_itr) { // packet was also in rtr list
+                        rtr_itr++;                          // increment rtr iterator
                     }
-                    window_itr++;
+                    window_itr++;   // increment iterators
                     new_rtr_itr++;
-                } else if (token_rtr[rtr_itr] < window[window_itr % WINDOW_SIZE].packet_id) {
-                    new_rtr[new_rtr_itr] = token_rtr[rtr_itr];
+                } else if (token_rtr[rtr_itr] < window[window_itr % WINDOW_SIZE].packet_id) { // rtr id is lower than window id
+                    new_rtr[new_rtr_itr] = token_rtr[rtr_itr]; // add rtr to new rtr array (we don't have it)
                     if (DEBUG) {
                         printf("add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
                     }
-                    new_rtr_itr++;
+                    new_rtr_itr++;  // increment iterators
                     rtr_itr++;
-                } else if (token_rtr[rtr_itr] == window[window_itr % WINDOW_SIZE].packet_id) {
+                } else if (token_rtr[rtr_itr] == window[window_itr % WINDOW_SIZE].packet_id) { // rtr packet is in window
                     if (packets_to_burst_itr < BURST_MSG) {
                         if (DEBUG) {
-                            printf("Adding to packets_to_burst retransmission of packet id %d\n", window[window_itr % WINDOW_SIZE].packet_id);
+                            printf("Adding to packets_to_burst retransmission of packet id %d\n", 
+                                window[window_itr % WINDOW_SIZE].packet_id);
                         }
-                        packets_to_burst[packets_to_burst_itr] = &(window[window_itr % WINDOW_SIZE]);
-                        packets_to_burst_itr++;
+                        packets_to_burst[packets_to_burst_itr] = &(window[window_itr % WINDOW_SIZE]); // add to burst array
+                        packets_to_burst_itr++; // increment burst iterator
                     } else {
-                        new_rtr[new_rtr_itr] = token_rtr[rtr_itr];
+                        new_rtr[new_rtr_itr] = token_rtr[rtr_itr]; // add to new rtr array if burst array is full
                         if (DEBUG) {
                             printf("Cannot add packet to packets_to_burst; add to new_rtr (id %d)\n", new_rtr[new_rtr_itr]);
                         }
                         new_rtr_itr++;
                     }
-                    window_itr++;
+                    window_itr++; // increment iterators
                     rtr_itr++;
-                } else {
-                    if (DEBUG) {
-                        //printf("increment window_itr\n");
-                    }
-                    window_itr++;
+                } else {          // rtr id is ahead of window
+                    window_itr++; // increment window iterator
                 }
             }
             if (DEBUG) {
-                printf("done with combined while loop, rtr_itr: %d, new_rtr_itr: %d, window_itr: %d\n", rtr_itr, new_rtr_itr, window_itr);
+                printf("done with combined while loop, rtr_itr: %d, new_rtr_itr: %d, window_itr: %d\n", 
+                    rtr_itr, new_rtr_itr, window_itr);
             }
             
+            /* Iterate through remaining retransmission requests (if any) */
             while (rtr_itr < rtr_size) {
                 new_rtr[new_rtr_itr] = token_rtr[rtr_itr];
                 if (DEBUG) {
@@ -333,10 +340,9 @@ int main(int argc, char **argv) {
             if (DEBUG) {
                 printf("window_itr: %d, prev_recvd_seq: %d\n", window_itr, prev_recvd_seq);
             }
+
+            /* Iterate through remaining window packets (if any) */
             while (window_itr <= prev_recvd_seq) {
-                if (DEBUG) {
-                    //printf("try adding locally missing to new_rtr, entered loop\n");
-                }
                 if (window[window_itr % WINDOW_SIZE].type == -1) {
                     new_rtr[new_rtr_itr] = window_itr;
                     if (DEBUG) {
@@ -349,8 +355,8 @@ int main(int argc, char **argv) {
             if (DEBUG) {
                 //printf("done processing received token's rtr\n");
             } 
-            /* TODO: while passing an mcast token, consider a smaller burst for 
-             * messages */
+            
+            /* Pepare new packets to burst (if burst array is not yet full) */
             packet_id = token.seq;
             while (packets_to_burst_itr < BURST_MSG 
                     && num_packets_sent+1 <= num_packets
@@ -359,7 +365,8 @@ int main(int argc, char **argv) {
                 if (packet_id == aru + 1){
                     aru++;
                 }
-                 /* This is not a truly uniform distribution of random numbers */
+                 /* NOTE: this is not a truly random distribution between 1 and 1 million.
+                  * However, it should be sufficient for our needs. */
                 random_number = (rand() % RAND_RANGE_MAX) + 1;
                 window[packet_id % WINDOW_SIZE].type = 3;
                 window[packet_id % WINDOW_SIZE].packet_id = packet_id;
@@ -373,16 +380,16 @@ int main(int argc, char **argv) {
                 packets_to_burst_itr++;
             }
 
+            /* Burst the first group of packets (pre-token) */
             int burst_count = 0;
-            /*send first half of packets*/
             while (burst_count < packets_to_burst_itr/4) {
                 /* Multicast Message */  
                 sendto(ss, (char *)packets_to_burst[burst_count], sizeof(Message),
                        0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
                 burst_count++;
             } 
-            /* If token is a StartToken and this machine has yet to establish 
-             * who to unicast to. */
+
+            /* Establish a target unicast IP if this process has not yet done so */
             if (DEBUG)
                 printf("IP address debug: Current send addr = %d, token type = %d, ip array val = %d\n",
                             send_addr_ucast.sin_addr.s_addr, token.type,
@@ -395,11 +402,10 @@ int main(int argc, char **argv) {
                     printf("Set target unicast IP address to %d\n", send_addr_ucast.sin_addr.s_addr);
             }
             
-            /* If the StartToken being passed around has yet to establish this 
-             * machine's IP address, set it. */
+            /* Add this machines IP to the token if this process has not yet done so
+             * (Note this only applies for the StartToken during round 1 */
             if (token.type == 1 
                 && ((StartToken *)&token)->ip_array[machine_id-1] == 0) {
-                /*If the start token has not set this machine's ip address yet. */
                 char my_name[80] = {'\0'};
                 struct hostent  h_ent;
                 struct hostent  *p_h_ent;
@@ -428,7 +434,7 @@ int main(int argc, char **argv) {
             token.tok_id++;
 
             /* Set initial token size (without rtr)*/
-            token_size = token.type == 1 ? 64 : 24 ;
+            token_size = token.type == 1 ? 64 : 24;
             
             /* Set new token's rtr to precomputed new_rtr */
             if (token.type == 1) {
@@ -442,9 +448,11 @@ int main(int argc, char **argv) {
             /* Set intended receiver. */
             token.recv = (machine_id%10) + 1;
                    
-            if (DEBUG) {
-                printf("\ttoken.aru: %d, local aru: %d, prev_aru: %d, prev_sent_aru: %d\n", token.aru, aru, prev_aru, prev_sent_aru);
+            if (DEBUG) { // debug: display information on token to be sent
+                printf("\ttoken.aru: %d, local aru: %d, prev_aru: %d, prev_sent_aru: %d\n",
+                     token.aru, aru, prev_aru, prev_sent_aru);
             } 
+            
             /* Update aru value if appropriate */
             int tmp_aru = token.aru;
             
@@ -465,12 +473,12 @@ int main(int argc, char **argv) {
                 /*aru = packet_id;*/
                 lowered_aru = 0;
                 if (DEBUG) {
-                    printf("\ttoken.seq == aru, %d. Set token and local aru equal to largest packet_id sending this round.\n", token.seq);
+                    printf("\ttoken.seq == aru, %d. Set token / local aru to largest packet_id in next burst.\n", token.seq);
                 }
             } else if (lowered_aru == 1 && prev_sent_aru == token.aru) {
                 if(token.aru != aru) {  // If our aru has increased 
                     if (DEBUG) {
-                        printf("\tlowered aru previous round, token aru remained same, local aru is larger, set token.aru %d to local aru %d\n", token.aru, aru);
+                        printf("\tlowered aru previously, token aru unchanged, update token.aru %d to local aru %d\n", token.aru, aru);
                     }
                     token.aru = aru;    // Update aru
                     //lowered_aru = 0; WE DON'T DO THIS BECAUSE WE MIGHT NEED TO KEEP RAISING IT
@@ -481,9 +489,9 @@ int main(int argc, char **argv) {
             }*/
             else {
                 if (DEBUG) {
-                    printf("\tdo nothing with token.aru %d\n", token.aru);
+                    printf("\tDo nothing with token.aru %d\n", token.aru);
                 }
-                lowered_aru = 0;        // Do nothing, clear lowered flag
+                lowered_aru = 0;    // Do nothing, clear lowered flag
             }
             prev_aru = tmp_aru;
             prev_sent_aru = token.aru;
@@ -517,7 +525,7 @@ int main(int argc, char **argv) {
                         (struct sockaddr *)&send_addr, sizeof(send_addr) );
                 }
             } else {
-                if(DEBUG == 1) {
+                if(DEBUG == 1) { // debug: print info on token and unicast target
                     int send_ip = send_addr_ucast.sin_addr.s_addr;
                     printf("unicast token with type %d, seq %d, tok_id%d\n",token.type, token.seq, token.tok_id);
                     printf("Target IP address is: %d.%d.%d.%d\n", (send_ip & 0xff000000) >>24,
@@ -546,9 +554,11 @@ int main(int argc, char **argv) {
             
             /* Deliver (write) packets received by all */
             if (tmp_prev_aru <= prev_aru) {
-                if(DEBUG == 1) {
+
+                if(DEBUG == 1) { // debug: print info on packets being delivered
                     printf("Attempting to deliver packets up to & including %d\n", tmp_prev_aru);
-                }                   
+                } 
+                  
                 while (window[start_of_window % WINDOW_SIZE].type != -1 
                     && window[start_of_window % WINDOW_SIZE].packet_id <= tmp_prev_aru) {
                     if(DEBUG == 1) {
@@ -564,44 +574,50 @@ int main(int argc, char **argv) {
                     window[start_of_window % WINDOW_SIZE].packet_id = INT_MAX;
                     start_of_window++;
                 }
-                if (DEBUG) {
+
+                if (DEBUG) { // debug: print done bitmask state
                     printf("token.done: %d\n", token.done);
                 }
+
+                /* If we believe everyone will deliver all messages, 
+                 * and everyone is done sending, burst last token */
                 if (tmp_prev_aru == token.seq && prev_aru == token.seq
                     && pow(2.0, (double)num_machines) - 1 == token.done) {
-                    /* If we believe everyone will deliver all messages, 
-                     * and everyone is done sending, burst last token */
+
                     burst_count = 0;
                     if (DEBUG) {
                         printf("\t\t BURST END\n");
                     }
+
                     while (burst_count < 12) {   
-                         /* Multicast Message */  
-                         sendto(uss, (char *)&token, token_size,
-                            0, (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast) );
-                         burst_count++;
-                         if (fw != NULL) {
-                             fclose(fw);
-                             fw = NULL;
-                             gettimeofday(&end_time, 0);
-                             int total_time =
+                        /* Multicast Message */  
+                        sendto(uss, (char *)&token, token_size,
+                           0, (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast) );
+                        burst_count++;
+                        if (fw != NULL) {
+                            fclose(fw); // TODO: Why do we close the file writer twice? (see below)
+                            fw = NULL;
+                            gettimeofday(&end_time, 0);
+                            int total_time =
                                 (end_time.tv_sec*1e6 + end_time.tv_usec)
                                 - (start_time.tv_sec*1e6 + start_time.tv_usec);
-                             printf("total time %d\n", total_time);
-                             return 0;
-                         }
+                            printf("Total measured time: %d ms\n", (int)(total_time/1e3));
+                            printf("Throughput: %f mbps\n\n", (token.seq + 1) * 1216 * 8.0 / total_time);
+                            return 0;
+                        }
                     }
                 }
                 if (DEBUG) {
-                    printf("exit attempt to deliver\n");
+                    printf("Done with delivery attempt\n");
                 }
             }
             
-            /* Set has_token to zero because sent out token*/
+            /* Set has_token to zero because sent out token */
             has_token = 0;
             /* We now wait for the ack */
             waiting_for_token_ack = 1;
         }
+
         /* Select: receive or timeout. */
         temp_mask = mask;
         num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
@@ -709,6 +725,7 @@ int main(int argc, char **argv) {
         } 
     }
     
+    /* Close the file writer */
     if (fw != NULL) {
         fclose(fw);
         fw = NULL;
@@ -718,7 +735,7 @@ int main(int argc, char **argv) {
 }
 
 /*
- *  Initialize the unicast send sockets
+ *  Initialize the unicast send sockets TODO: Might as well put this in the main function
  */
 struct sockaddr_in initUnicastSend(int next_ip)
 {
