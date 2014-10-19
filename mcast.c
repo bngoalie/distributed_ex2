@@ -264,12 +264,13 @@ int main(int argc, char **argv) {
                
             /* Check rtr for packets machine is holding. If have packet, add 
              * to array of packets to send in burst. */
-            Message *packets_to_burst[BURST_MSG];
+            Message *packets_to_burst[BURST_MSG + MAX_PACKET_SIZE - 24];    // Burst size plus max rtr 
             int tmp_prev_aru = prev_sent_aru;
             int packets_to_burst_itr = 0;
             int window_itr = start_of_window;
             int rtr_itr = 0;
             int rtr_size = (token.type == 1 ? bytes - 64 : bytes - 24)/sizeof(int);
+            int rtr_max = (token.type == 1 ? MAX_PACKET_SIZE - 64 : MAX_PACKET_SIZE - 24);
             int new_rtr[MAX_PACKET_SIZE - 24];
             int new_rtr_itr = 0;
             int *token_rtr = token.rtr;
@@ -286,41 +287,38 @@ int main(int argc, char **argv) {
             }
             while (rtr_itr < rtr_size && window_itr <= prev_recvd_seq) {
                 if (window[window_itr % WINDOW_SIZE].type == -1) {  // expected packet is missing from window
-                    new_rtr[new_rtr_itr] = window_itr;              // add retransmission request
-                    if (DEBUG) {
-                        printf("window missing id: add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
+                    if (new_rtr_itr < rtr_max) {       // have not yet exceeded rtr limit
+                        new_rtr[new_rtr_itr] = window_itr;          // add retransmission request
+                        if (DEBUG) {
+                            printf("window missing id: add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
+                        }
+                        new_rtr_itr++;  // increment new rtr iterator
                     }
                     if (token_rtr[rtr_itr] == window_itr) { // packet was also in rtr list
-                        rtr_itr++;                          // increment rtr iterator
+                        rtr_itr++;                          // increment old rtr iterator
                     }
-                    window_itr++;   // increment iterators
-                    new_rtr_itr++;
+                    window_itr++;   // increment window iterator even if not added to new rtr
                 } else if (token_rtr[rtr_itr] < window[window_itr % WINDOW_SIZE].packet_id) { // rtr id is lower than window id
-                    new_rtr[new_rtr_itr] = token_rtr[rtr_itr]; // add rtr to new rtr array (we don't have it)
-                    if (DEBUG) {
-                        printf("add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
+                    if (new_rtr_itr < rtr_max) {      // have not yet exceeded rtr limit
+                        new_rtr[new_rtr_itr] = token_rtr[rtr_itr]; // add rtr to new rtr array (we don't have it)
+                        if (DEBUG) {
+                            printf("add to new_rtr id %d\n", new_rtr[new_rtr_itr]);
+                        }
+                        new_rtr_itr++;  // increment new rtr iterator
                     }
-                    new_rtr_itr++;  // increment iterators
-                    rtr_itr++;
+                    rtr_itr++;  // increment old rtr iterator even if not added to new rtr
                 } else if (token_rtr[rtr_itr] == window[window_itr % WINDOW_SIZE].packet_id) { // rtr packet is in window
-                    if (packets_to_burst_itr < BURST_MSG) {
-                        if (DEBUG) {
-                            printf("Adding to packets_to_burst retransmission of packet id %d\n", 
-                                window[window_itr % WINDOW_SIZE].packet_id);
-                        }
-                        packets_to_burst[packets_to_burst_itr] = &(window[window_itr % WINDOW_SIZE]); // add to burst array
-                        packets_to_burst_itr++; // increment burst iterator
-                    } else {
-                        new_rtr[new_rtr_itr] = token_rtr[rtr_itr]; // add to new rtr array if burst array is full
-                        if (DEBUG) {
-                            printf("Cannot add packet to packets_to_burst; add to new_rtr (id %d)\n", new_rtr[new_rtr_itr]);
-                        }
-                        new_rtr_itr++;
+                    if (DEBUG) {
+                        printf("Adding to packets_to_burst retransmission of packet id %d\n", 
+                            window[window_itr % WINDOW_SIZE].packet_id);
                     }
+                    packets_to_burst[packets_to_burst_itr] = &(window[window_itr % WINDOW_SIZE]); // add to burst array
+                    packets_to_burst_itr++; // increment burst iterator
+                    
                     window_itr++; // increment iterators
                     rtr_itr++;
                 } else {          // rtr id is ahead of window
-                    window_itr++; // increment window iterator
+                    window_itr++; // increment window iterator only
                 }
             }
             if (DEBUG) {
@@ -329,7 +327,7 @@ int main(int argc, char **argv) {
             }
             
             /* Iterate through remaining retransmission requests (if any) */
-            while (rtr_itr < rtr_size) {
+            while (rtr_itr < rtr_size && new_rtr_itr < rtr_max) {
                 new_rtr[new_rtr_itr] = token_rtr[rtr_itr];
                 if (DEBUG) {
                     printf("Adding to new_rtr (id %d)\n", new_rtr[new_rtr_itr]);
@@ -342,7 +340,7 @@ int main(int argc, char **argv) {
             }
 
             /* Iterate through remaining window packets (if any) */
-            while (window_itr <= prev_recvd_seq) {
+            while (window_itr <= prev_recvd_seq && new_rtr_itr < rtr_max) {
                 if (window[window_itr % WINDOW_SIZE].type == -1) {
                     new_rtr[new_rtr_itr] = window_itr;
                     if (DEBUG) {
@@ -356,17 +354,18 @@ int main(int argc, char **argv) {
                 //printf("done processing received token's rtr\n");
             } 
             
-            /* Pepare new packets to burst (if burst array is not yet full) */
+            /* Pepare new packets to burst  */
+            int rt_burst_count = packets_to_burst_itr;
             packet_id = token.seq;
-            while (packets_to_burst_itr < BURST_MSG 
+            while ((packets_to_burst_itr - rt_burst_count) < BURST_MSG 
                     && num_packets_sent+1 <= num_packets
                     && window[(packet_id+1) % WINDOW_SIZE].type == -1) {
                 packet_id++;
                 if (packet_id == aru + 1){
                     aru++;
                 }
-                 /* NOTE: this is not a truly random distribution between 1 and 1 million.
-                  * However, it should be sufficient for our needs. */
+                /* NOTE: this is not a truly random distribution between 1 and 1 million.
+                 * However, it should be sufficient for our needs. */
                 random_number = (rand() % RAND_RANGE_MAX) + 1;
                 window[packet_id % WINDOW_SIZE].type = 3;
                 window[packet_id % WINDOW_SIZE].packet_id = packet_id;

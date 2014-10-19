@@ -20,7 +20,7 @@
 #define TOKEN_BURST     3
 #define RAND_RANGE_MAX  1000000
 #define TIMEOUT_USEC    100
-#define DEBUG           0
+#define DEBUG           1
 #define MAX_MACHINES    10
 
 /* Packet types:
