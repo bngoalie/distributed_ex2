@@ -14,13 +14,13 @@
 #define UNICAST_PORT    10011
 #define MCAST_IP        225 << 24 | 1 << 16 | 2 << 8 | 101 /* (255.1.2.101)  */
 #define BURST_MSG       100
-#define WINDOW_SIZE     6500
+#define WINDOW_SIZE     6700
 #define MAX_PACKET_SIZE 1400
 #define PAYLOAD_SIZE    1200
 #define TOKEN_BURST     3
 #define RAND_RANGE_MAX  1000000
 #define TIMEOUT_USEC    100
-#define DEBUG          0 
+#define DEBUG           0 
 #define MAX_MACHINES    10
 
 /* Packet types:
