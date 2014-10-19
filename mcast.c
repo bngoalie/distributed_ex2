@@ -231,33 +231,14 @@ int main(int argc, char **argv) {
             if(DEBUG == 1) {
                 printf("At round %d\n", (++round));
                 printf("\tReceived token with type %d, seq %d, aru %d\n", token.type, token.seq, token.aru);
-                if (token.type == 1) {
-                   
-                    printf("Token has IP addresses: ");
-                    for (int idx = 0; idx < num_machines; idx++) {
-                        printf("%d ", ((StartToken *)&token)->ip_array[idx]);
-                    }
-                    printf("\nmachine to ack is at index %d and has ip address %d\n", 
-                        (machine_id-2+num_machines)%num_machines, 
-                        ((StartToken *)&token)->ip_array[(machine_id - 2 + num_machines) % num_machines]);
-                }
             }
             if (send_addr_ucast_ack.sin_addr.s_addr == 0 && token.type == 1  
                 && ((StartToken *)&token)->ip_array[(machine_id - 2 + num_machines) % num_machines] != 0) {
-                if (DEBUG) {
-                    printf("Set send_addr_ucast_ack with initUnicastSend\n");
-                }
                 send_addr_ucast_ack = initUnicastSend(
                     ((StartToken *)&token)->ip_array[(machine_id - 2 + num_machines) % num_machines]);
-                if (DEBUG) {
-                    printf("Ack ip address is now %d \n", send_addr_ucast_ack.sin_addr.s_addr);
-                }
             }
             if (send_addr_ucast_ack.sin_addr.s_addr != 0) {
                 /* Unicast ack*/
-                if(DEBUG) {
-                    printf("Sending ack...\n");
-                }
                 sendto(uss, (char *)&ack_packet, 32, 0, 
                     (struct sockaddr *)&send_addr_ucast_ack, sizeof(send_addr_ucast_ack));
             }
@@ -269,7 +250,7 @@ int main(int argc, char **argv) {
             int window_itr = start_of_window;
             int rtr_itr = 0;
             int rtr_size = (token.type == 1 ? bytes - 64 : bytes - 24)/sizeof(int);
-            int rtr_max = (token.type == 1 ? MAX_PACKET_SIZE - 64 : MAX_PACKET_SIZE - 24);
+            int rtr_max = BURST_MSG;
             int new_rtr[rtr_max];
             Message *packets_to_burst[BURST_MSG + rtr_max];    // Burst size plus max rtr 
             int new_rtr_itr = 0;
@@ -321,10 +302,6 @@ int main(int argc, char **argv) {
                     window_itr++; // increment window iterator only
                 }
             }
-            if (DEBUG) {
-                printf("done with combined while loop, rtr_itr: %d, new_rtr_itr: %d, window_itr: %d\n", 
-                    rtr_itr, new_rtr_itr, window_itr);
-            }
             
             /* Iterate through remaining retransmission requests (if any) */
             while (rtr_itr < rtr_size && new_rtr_itr < rtr_max) {
@@ -334,9 +311,6 @@ int main(int argc, char **argv) {
                 }
                 new_rtr_itr++;
                 rtr_itr++;
-            }
-            if (DEBUG) {
-                printf("window_itr: %d, prev_recvd_seq: %d\n", window_itr, prev_recvd_seq);
             }
 
             /* Iterate through remaining window packets (if any) */
@@ -350,14 +324,12 @@ int main(int argc, char **argv) {
                 }
                 window_itr++;
             }
-            if (DEBUG) {
-                //printf("done processing received token's rtr\n");
-            } 
             
             /* Pepare new packets to burst  */
-            int rt_burst_count = packets_to_burst_itr;
             packet_id = token.seq;
-            while ((packets_to_burst_itr - rt_burst_count) < BURST_MSG 
+            if (DEBUG)
+                printf("Adding new packet to packets_to_burst (starting AFTER id %d)\n", packet_id+1);
+            while ((packets_to_burst_itr) < BURST_MSG 
                     && num_packets_sent+1 <= num_packets
                     && window[(packet_id+1) % WINDOW_SIZE] == NULL
                     && (packet_id+1) != start_of_window + WINDOW_SIZE) {
@@ -377,12 +349,11 @@ int main(int argc, char **argv) {
                 window[packet_id % WINDOW_SIZE]->machine = machine_id;
                 window[packet_id % WINDOW_SIZE]->rand = random_number;
                 packets_to_burst[packets_to_burst_itr] = window[packet_id % WINDOW_SIZE];
-                if(DEBUG) {
-                    printf("Adding new packet to packets_to_burst (id %d)\n", packet_id);
-                }
                 num_packets_sent++;
                 packets_to_burst_itr++;
             }
+            if (DEBUG)
+                printf("Adding new packet to packets_to_burst (ended at id %d)\n", packet_id);
 
             /* Burst the first group of packets (pre-token) */
             int burst_count = 0;
@@ -394,16 +365,10 @@ int main(int argc, char **argv) {
             } 
 
             /* Establish a target unicast IP if this process has not yet done so */
-            if (DEBUG)
-                printf("IP address debug: Current send addr = %d, token type = %d, ip array val = %d\n",
-                            send_addr_ucast.sin_addr.s_addr, token.type,
-                            ((StartToken *)&token)->ip_array[machine_id % num_machines]);
             if (send_addr_ucast.sin_addr.s_addr == 0 && token.type == 1  
                 && ((StartToken *)&token)->ip_array[machine_id % num_machines] != 0) {
                 send_addr_ucast = initUnicastSend(
                     ((StartToken *)&token)->ip_array[machine_id % num_machines]);
-                if (DEBUG)
-                    printf("Set target unicast IP address to %d\n", send_addr_ucast.sin_addr.s_addr);
             }
             
             /* Add this machines IP to the token if this process has not yet done so
@@ -424,9 +389,6 @@ int main(int argc, char **argv) {
 
                 memcpy( &h_ent, p_h_ent, sizeof(h_ent));
                 memcpy( &my_ip, h_ent.h_addr_list[0], sizeof(my_ip) );
-                if (DEBUG) {
-                    printf("set this machines index in token ip_array to %d\n", my_ip);
-                }
                 ((StartToken *)&token)->ip_array[machine_id-1] = my_ip;
             } else if (machine_id == num_machines - 1) {
                 // Implicitly determined that already received start packet in a
@@ -521,25 +483,13 @@ int main(int argc, char **argv) {
             /* Send token using appropriate socket */
             if (send_addr_ucast.sin_addr.s_addr == 0) {
                 /* Multicast Token */
-                if(DEBUG == 1) {
-                    printf("multicast token\n");
-                }
                 for (int x = 0; x < TOKEN_BURST; x++) {
                     sendto(ss, (char *)&token, token_size, 0, 
                         (struct sockaddr *)&send_addr, sizeof(send_addr) );
                 }
             } else {
                 if(DEBUG == 1) { // debug: print info on token and unicast target
-                    int send_ip = send_addr_ucast.sin_addr.s_addr;
                     printf("unicast token with type %d, seq %d, tok_id%d\n",token.type, token.seq, token.tok_id);
-                    printf("Target IP address is: %d.%d.%d.%d\n", (send_ip & 0xff000000) >>24,
-                          (send_ip & 0x00ff0000)>>16,
-                          (send_ip & 0x0000ff00)>>8,
-                          (send_ip & 0x000000ff) );
-                    if (token.type == 1) {
-                        printf("token ip_array has value %d for this machine\n", ((StartToken *)&token)->ip_array[machine_id-1]);
-                    }
-
                 }
                 /* Unicast Token */
                 for (int x = 0; x < TOKEN_BURST; x++) {
@@ -640,9 +590,6 @@ int main(int argc, char **argv) {
                     if (((Packet *)mess_buf)->type == 1 
                          && ((Token *)mess_buf)->recv == machine_id
                          && token.tok_id < ((Token *)mess_buf)->tok_id) {
-                         if(DEBUG == 1) {
-                             printf("received token\n");
-                         }
                          /* Received packet is a<token */
                          /* Use token if we have not received this token before. */
                          /* Copy received token into local placeholder for token. */
@@ -655,9 +602,6 @@ int main(int argc, char **argv) {
                              printf("received message of id %d\n", tmp_msg->packet_id);
                          }
                          if (tmp_msg->packet_id > packet_id) {
-                            if (DEBUG) {
-                                printf("received implicit ack\n");
-                            }   
                             waiting_for_token_ack = 0;
                          }
                          if (tmp_msg->packet_id >= start_of_window 
@@ -680,7 +624,8 @@ int main(int argc, char **argv) {
                         }
                     }
                 }
-            } else if ( FD_ISSET( usr, &temp_mask) ) {
+            } 
+            if ( FD_ISSET( usr, &temp_mask) ) {
                 /* Is unicasted packet */
                 bytes = recv_dbg(usr, mess_buf, MAX_PACKET_SIZE, 0);
                 if (bytes > 0) {
@@ -693,9 +638,6 @@ int main(int argc, char **argv) {
                     if ((((Packet *)mess_buf)->type == 1 
                         || ((Packet *)mess_buf)->type == 2)
                         && token.tok_id < ((Token *)mess_buf)->tok_id) {
-                        if(DEBUG == 1) {
-                             printf("received token with seq %d\n", ((Token *)mess_buf)->seq);
-                        }
                         /* Received packet is a token */
                         /* Use token if we have not received this token before. */
                         /* Copy received token into local placeholder for token. */
