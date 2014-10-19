@@ -264,14 +264,14 @@ int main(int argc, char **argv) {
                
             /* Check rtr for packets machine is holding. If have packet, add 
              * to array of packets to send in burst. */
-            Message *packets_to_burst[BURST_MSG + MAX_PACKET_SIZE - 24];    // Burst size plus max rtr 
             int tmp_prev_aru = prev_sent_aru;
             int packets_to_burst_itr = 0;
             int window_itr = start_of_window;
             int rtr_itr = 0;
             int rtr_size = (token.type == 1 ? bytes - 64 : bytes - 24)/sizeof(int);
             int rtr_max = (token.type == 1 ? MAX_PACKET_SIZE - 64 : MAX_PACKET_SIZE - 24);
-            int new_rtr[MAX_PACKET_SIZE - 24];
+            int new_rtr[rtr_max];
+            Message *packets_to_burst[BURST_MSG + rtr_max];    // Burst size plus max rtr 
             int new_rtr_itr = 0;
             int *token_rtr = token.rtr;
             if (token.type == 1) {
@@ -359,7 +359,8 @@ int main(int argc, char **argv) {
             packet_id = token.seq;
             while ((packets_to_burst_itr - rt_burst_count) < BURST_MSG 
                     && num_packets_sent+1 <= num_packets
-                    && window[(packet_id+1) % WINDOW_SIZE].type == -1) {
+                    && window[(packet_id+1) % WINDOW_SIZE].type == -1
+                    && (packet_id+1) != start_of_window + WINDOW_SIZE) {
                 packet_id++;
                 if (packet_id == aru + 1){
                     aru++;
