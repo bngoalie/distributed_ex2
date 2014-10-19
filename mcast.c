@@ -386,7 +386,7 @@ int main(int argc, char **argv) {
 
             /* Burst the first group of packets (pre-token) */
             int burst_count = 0;
-            while (burst_count < packets_to_burst_itr/4) {
+            while (burst_count < packets_to_burst_itr/2) {
                 /* Multicast Message */  
                 sendto(ss, (char *)packets_to_burst[burst_count], sizeof(Message),
                        0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
