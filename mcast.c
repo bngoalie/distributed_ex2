@@ -161,10 +161,6 @@ int main(int argc, char **argv) {
     send_addr.sin_addr.s_addr = htonl(mcast_addr);  // Multicast address
     send_addr.sin_port = htons(MCAST_PORT);
     
-    for (int idx = 0; idx < WINDOW_SIZE; idx++) {
-        window[idx] = NULL;
-    }
-
     /* Set ack packet type */
     ack_packet.type = 4;
 
@@ -184,6 +180,12 @@ int main(int argc, char **argv) {
         }
     }
     token.tok_id = -1;
+
+    /* Malloc window messages (pre-emptive) */
+    for (int i = 0; i < WINDOW_SIZE; i++) {
+        window[i] = malloc(sizeof(Message));
+        window[i]->type = -1;   // Set as empty
+    }
 
     /* Set masks for I/O Multiplexing */
     FD_ZERO( &mask );
@@ -250,9 +252,9 @@ int main(int argc, char **argv) {
             int window_itr = start_of_window;
             int rtr_itr = 0;
             int rtr_size = (token.type == 1 ? bytes - 64 : bytes - 24)/sizeof(int);
-            int rtr_max = BURST_MSG;
+            int rtr_max = token.type == 1 ? MAX_PACKET_SIZE - 64 : MAX_PACKET_SIZE - 24;
             int new_rtr[rtr_max];
-            Message *packets_to_burst[BURST_MSG + rtr_max];    // Burst size plus max rtr 
+            Message *packets_to_burst[BURST_MSG];    // Burst size
             int new_rtr_itr = 0;
             int *token_rtr = token.rtr;
             if (token.type == 1) {
@@ -267,7 +269,7 @@ int main(int argc, char **argv) {
             printf("rtr size: %d, window_itr start value: %d, prev_recvd_seq: %d\n", rtr_size, window_itr, prev_recvd_seq);
             }
             while (rtr_itr < rtr_size && window_itr <= prev_recvd_seq) {
-                if (window[window_itr % WINDOW_SIZE] == NULL) {  // expected packet is missing from window
+                if (window[window_itr % WINDOW_SIZE]->type == -1) {  // expected packet is missing from window
                     if (new_rtr_itr < rtr_max) {       // have not yet exceeded rtr limit
                         new_rtr[new_rtr_itr] = window_itr;          // add retransmission request
                         if (DEBUG) {
@@ -293,9 +295,11 @@ int main(int argc, char **argv) {
                         printf("Adding to packets_to_burst retransmission of packet id %d\n", 
                             window[window_itr % WINDOW_SIZE]->packet_id);
                     }
-                    packets_to_burst[packets_to_burst_itr] = window[window_itr % WINDOW_SIZE]; // add to burst array
-                    packets_to_burst_itr++; // increment burst iterator
-                    
+                    if (packets_to_burst_itr < BURST_MSG) {
+                        packets_to_burst[packets_to_burst_itr] = window[window_itr % WINDOW_SIZE]; // add to burst array
+                        packets_to_burst_itr++; // increment burst iterator
+                    }
+            
                     window_itr++; // increment iterators
                     rtr_itr++;
                 } else {          // rtr id is ahead of window
@@ -305,17 +309,24 @@ int main(int argc, char **argv) {
             
             /* Iterate through remaining retransmission requests (if any) */
             while (rtr_itr < rtr_size && new_rtr_itr < rtr_max) {
-                new_rtr[new_rtr_itr] = token_rtr[rtr_itr];
-                if (DEBUG) {
-                    printf("Adding to new_rtr (id %d)\n", new_rtr[new_rtr_itr]);
+                if (window[token_rtr[rtr_itr] % WINDOW_SIZE]->type != -1
+                    && window[token_rtr[rtr_itr] % WINDOW_SIZE]->packet_id == token_rtr[rtr_itr]
+                    && packets_to_burst_itr < BURST_MSG) {
+                    packets_to_burst[packets_to_burst_itr] = window[token_rtr[rtr_itr] % WINDOW_SIZE]; // add to burst array
+                    packets_to_burst_itr++; // increment burst iterator
+                } else {
+                    new_rtr[new_rtr_itr] = token_rtr[rtr_itr];
+                    if (DEBUG) {
+                        printf("Adding to new_rtr (id %d)\n", new_rtr[new_rtr_itr]);
+                    }
+                    new_rtr_itr++;
                 }
-                new_rtr_itr++;
                 rtr_itr++;
             }
 
             /* Iterate through remaining window packets (if any) */
             while (window_itr <= prev_recvd_seq && new_rtr_itr < rtr_max) {
-                if (window[window_itr % WINDOW_SIZE] == NULL) {
+                if (window[window_itr % WINDOW_SIZE]->type == -1) {
                     new_rtr[new_rtr_itr] = window_itr;
                     if (DEBUG) {
                         printf("Adding to new_rtr (id %d)\n", new_rtr[new_rtr_itr]);
@@ -331,7 +342,7 @@ int main(int argc, char **argv) {
                 printf("Adding new packet to packets_to_burst (starting AFTER id %d)\n", packet_id+1);
             while ((packets_to_burst_itr) < BURST_MSG 
                     && num_packets_sent+1 <= num_packets
-                    && window[(packet_id+1) % WINDOW_SIZE] == NULL
+                    && window[(packet_id+1) % WINDOW_SIZE]->type == -1
                     && (packet_id+1) != start_of_window + WINDOW_SIZE) {
                 packet_id++;
                 if (packet_id == aru + 1){
@@ -340,10 +351,6 @@ int main(int argc, char **argv) {
                 /* NOTE: this is not a truly random distribution between 1 and 1 million.
                  * However, it should be sufficient for our needs. */
                 random_number = (rand() % RAND_RANGE_MAX) + 1;
-                if ((window[packet_id % WINDOW_SIZE] = malloc(sizeof(Message))) == 0) {
-                    perror("Fail to malloc new message\n");
-                    exit(0);
-                }
                 window[packet_id % WINDOW_SIZE]->type = 3;
                 window[packet_id % WINDOW_SIZE]->packet_id = packet_id;
                 window[packet_id % WINDOW_SIZE]->machine = machine_id;
@@ -357,7 +364,7 @@ int main(int argc, char **argv) {
 
             /* Burst the first group of packets (pre-token) */
             int burst_count = 0;
-            while (burst_count < packets_to_burst_itr/2) {
+            while (burst_count < 1*packets_to_burst_itr/3) {
                 /* Multicast Message */  
                 sendto(ss, (char *)packets_to_burst[burst_count], sizeof(Message),
                        0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
@@ -513,7 +520,7 @@ int main(int argc, char **argv) {
                     printf("Attempting to deliver packets up to & including %d\n", tmp_prev_aru);
                 } 
                   
-                while (window[start_of_window % WINDOW_SIZE] != NULL 
+                while (window[start_of_window % WINDOW_SIZE]->type != -1 
                     && window[start_of_window % WINDOW_SIZE]->packet_id <= tmp_prev_aru) {
                     if(DEBUG == 1) {
                          printf("start_of_window: %d\n", start_of_window);
@@ -524,8 +531,7 @@ int main(int argc, char **argv) {
                     Message *tmp_msg = window[start_of_window % WINDOW_SIZE];
                     fprintf(fw, "%2d, %8d, %8d\n", tmp_msg->machine, 
                         tmp_msg->packet_id, tmp_msg->rand);
-                    free(window[start_of_window % WINDOW_SIZE]);
-                    window[start_of_window % WINDOW_SIZE] = NULL;
+                    window[start_of_window % WINDOW_SIZE]->type = -1;
                     start_of_window++;
                 }
 
@@ -557,6 +563,9 @@ int main(int argc, char **argv) {
                                 - (start_time.tv_sec*1e6 + start_time.tv_usec);
                             printf("Total measured time: %d ms\n", (int)(total_time/1e3));
                             printf("Throughput: %f mbps\n\n", (token.seq + 1) * 1216 * 8.0 / total_time);
+                            /* Free window heap memory */
+                            for (int i = 0; i < WINDOW_SIZE; i++)
+                                free(window[i]);
                             return 0;
                         }
                     }
@@ -605,11 +614,7 @@ int main(int argc, char **argv) {
                             waiting_for_token_ack = 0;
                          }
                          if (tmp_msg->packet_id >= start_of_window 
-                                && window[tmp_msg->packet_id % WINDOW_SIZE] == NULL) {
-                             if ((window[tmp_msg->packet_id % WINDOW_SIZE] = malloc(sizeof(Message))) == 0) {
-                                perror("Fail mallocing new received message\n");
-                                exit(0);
-                             }
+                                && window[tmp_msg->packet_id % WINDOW_SIZE]->type == -1) {
                              window[tmp_msg->packet_id % WINDOW_SIZE]->type = tmp_msg->type;
                              window[tmp_msg->packet_id % WINDOW_SIZE]->packet_id = tmp_msg->packet_id;
                              window[tmp_msg->packet_id % WINDOW_SIZE]->machine = tmp_msg->machine;
@@ -617,7 +622,7 @@ int main(int argc, char **argv) {
                              /* update aru */
                              /* While we have received the next packet_id above the current aru
                               * increment the aru (set to that packet_id). */
-                             while (window[(aru+1) % WINDOW_SIZE] != NULL 
+                             while (window[(aru+1) % WINDOW_SIZE]->type != -1
                                  && window[(aru+1) % WINDOW_SIZE]->packet_id == aru+1) {
                                  aru++;
                              }
@@ -681,7 +686,10 @@ int main(int argc, char **argv) {
         fclose(fw);
         fw = NULL;
     }
-
+    /* Free window heap memory */
+    for (int i = 0; i < WINDOW_SIZE; i++)
+        free(window[i]);
+    
     return 0;
 }
 
