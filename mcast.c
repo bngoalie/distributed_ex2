@@ -1,34 +1,39 @@
+/*
+ * Ethan Bennis and Ben Glickman
+ * CS437 Distributed Systems
+ * Johns Hopkins University
+ * Exercise 2: Multicast
+ */
+
 #include "net_include.h"
 #include "recv_dbg.h"
 #include <math.h>
 #include <limits.h>
 
+/* Function prototypes */
 struct sockaddr_in initUnicastSend(int);
 
 int main(int argc, char **argv) {
-    /*
-     *  Declarations
-     */
+    
+    /* Declarations */
     struct sockaddr_in name;
     struct sockaddr_in send_addr;
     struct sockaddr_in send_addr_ucast;
     struct sockaddr_in send_addr_ucast_ack;
-    int                mcast_addr;
-    struct ip_mreq     mreq;
-    unsigned char      ttl_val;
-    int                uss,usr; // Unicast sockets
-    int                ss,sr;   // Multicast sockets
     fd_set             mask;
     fd_set             dummy_mask,temp_mask;
+    unsigned char      ttl_val;
+    struct ip_mreq     mreq;
+    int                mcast_addr;
+    int                uss,usr;     // Unicast sockets
+    int                ss,sr;       // Multicast sockets
     int                bytes;
     int                num;
-    char               mess_buf[MAX_PACKET_SIZE];
     int                machine_id;
     int                num_packets;
     int                num_packets_sent = 0;
     int                num_machines;
     int                loss_rate;
-    Message            *window[WINDOW_SIZE];
     int                waiting_for_token_ack = 0;
     int                aru = -1;
     int                prev_aru = INT_MAX;
@@ -36,19 +41,20 @@ int main(int argc, char **argv) {
     int                lowered_aru = 0;
     int                start_of_window = 0;
     int                prev_recvd_seq = -1;
-    FILE               *fw = NULL;
     int                random_number;
     int                packet_id = -1;
     int                token_size = 0;
-    struct timeval     timeout;
     int                round = 0;
+    FILE               *fw = NULL;
+    struct timeval     timeout;
     struct timeval     start_time;    
     struct timeval     end_time;
+    char               mess_buf[MAX_PACKET_SIZE];
+    Message            *window[WINDOW_SIZE];
     Packet             ack_packet;
-    
-    /* 
-     *  Initial program setup
-     */
+     
+    /*  Initial program setup */
+    /* ------------------------------------------------------------------------------------------ */
 
     /* Need four arguements: number of packets, machine index, 
      * number of machines, and loss_rate_percent */
@@ -71,7 +77,8 @@ int main(int argc, char **argv) {
 
     /* Initialize recv_dbg with loss rate */
     recv_dbg_init(loss_rate, machine_id);
-    
+   
+    /* Initialize unicast send addresses as 0 */ 
     send_addr_ucast.sin_addr.s_addr = 0;
     send_addr_ucast_ack.sin_addr.s_addr = 0;
     
@@ -142,8 +149,8 @@ int main(int argc, char **argv) {
         perror("Mcast: socket");
         exit(1);
     }
-
-    ttl_val = 1;
+    
+    ttl_val = 1;    // Time-to-live is one (local network only)
     if (setsockopt(ss, IPPROTO_IP, IP_MULTICAST_TTL, (void *)&ttl_val, 
         sizeof(ttl_val)) < 0) 
     {
@@ -164,10 +171,10 @@ int main(int argc, char **argv) {
     /* Set ack packet type */
     ack_packet.type = 4;
 
-    /* Set up initial token values */
+    /* Establish token */
     int has_token = 0;
     Token token;
-    if (machine_id == 1) {
+    if (machine_id == 1) { // If we are process 1, initialize fields
         token.done = 0;
         token.seq = -1;
         token.aru = -1;
@@ -181,7 +188,7 @@ int main(int argc, char **argv) {
     }
     token.tok_id = -1;
 
-    /* Malloc window messages (pre-emptive) */
+    /* Malloc window messages */
     for (int i = 0; i < WINDOW_SIZE; i++) {
         window[i] = malloc(sizeof(Message));
         window[i]->type = -1;   // Set as empty
@@ -194,10 +201,10 @@ int main(int argc, char **argv) {
     FD_SET( usr, &mask );
     Packet *start_packet;
     int waiting = 1;
+    
+    /* Wait for start_mcast packet */    
+    /* ------------------------------------------------------------------------------------------ */
 
-    /*
-     *  Wait for the start_mcast packet
-     */ 
     while (waiting == 1) {
         temp_mask = mask;
         num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
@@ -216,12 +223,11 @@ int main(int argc, char **argv) {
         }
     }
 
-    // --------------------------------------------------------------------------------------------//
+    /* Begin multicast transfer */
+    /* ------------------------------------------------------------------------------------------- */
 
-    /*
-     *  Main loop
-     */ 
-    for (;;) {
+    /* Main loop */
+    for (;;){   
         if (DEBUG) {
             printf("Entering main loop (infinite):\n");
         }
@@ -338,8 +344,6 @@ int main(int argc, char **argv) {
             
             /* Pepare new packets to burst  */
             packet_id = token.seq;
-            if (DEBUG)
-                printf("Adding new packet to packets_to_burst (starting AFTER id %d)\n", packet_id+1);
             while ((packets_to_burst_itr) < BURST_MSG 
                     && num_packets_sent+1 <= num_packets
                     && window[(packet_id+1) % WINDOW_SIZE]->type == -1
@@ -359,8 +363,6 @@ int main(int argc, char **argv) {
                 num_packets_sent++;
                 packets_to_burst_itr++;
             }
-            if (DEBUG)
-                printf("Adding new packet to packets_to_burst (ended at id %d)\n", packet_id);
 
             /* Burst the first group of packets (pre-token) */
             int burst_count = 0;
@@ -555,7 +557,7 @@ int main(int argc, char **argv) {
                            0, (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast) );
                         burst_count++;
                         if (fw != NULL) {
-                            fclose(fw); // TODO: Why do we close the file writer twice? (see below)
+                            fclose(fw); 
                             fw = NULL;
                             gettimeofday(&end_time, 0);
                             int total_time =
@@ -615,23 +617,23 @@ int main(int argc, char **argv) {
                          }
                          if (tmp_msg->packet_id >= start_of_window 
                                 && window[tmp_msg->packet_id % WINDOW_SIZE]->type == -1) {
-                             window[tmp_msg->packet_id % WINDOW_SIZE]->type = tmp_msg->type;
-                             window[tmp_msg->packet_id % WINDOW_SIZE]->packet_id = tmp_msg->packet_id;
-                             window[tmp_msg->packet_id % WINDOW_SIZE]->machine = tmp_msg->machine;
-                             window[tmp_msg->packet_id % WINDOW_SIZE]->rand = tmp_msg->rand;
-                             /* update aru */
-                             /* While we have received the next packet_id above the current aru
-                              * increment the aru (set to that packet_id). */
-                             while (window[(aru+1) % WINDOW_SIZE]->type != -1
-                                 && window[(aru+1) % WINDOW_SIZE]->packet_id == aru+1) {
-                                 aru++;
-                             }
+                            window[tmp_msg->packet_id % WINDOW_SIZE]->type = tmp_msg->type;
+                            window[tmp_msg->packet_id % WINDOW_SIZE]->packet_id = tmp_msg->packet_id;
+                            window[tmp_msg->packet_id % WINDOW_SIZE]->machine = tmp_msg->machine;
+                            window[tmp_msg->packet_id % WINDOW_SIZE]->rand = tmp_msg->rand;
+                            /* update aru */
+                            /* While we have received the next packet_id above the current aru
+                             * increment the aru (set to that packet_id). */
+                            while (window[(aru+1) % WINDOW_SIZE]->type != -1
+                                && window[(aru+1) % WINDOW_SIZE]->packet_id == aru+1) {
+                                aru++;
+                            }
                         }
                     }
                 }
             } 
             if ( FD_ISSET( usr, &temp_mask) ) {
-                /* Is unicasted packet */
+                /* Unicast socket has packet */
                 bytes = recv_dbg(usr, mess_buf, MAX_PACKET_SIZE, 0);
                 if (bytes > 0) {
                     if (DEBUG) {
@@ -680,7 +682,8 @@ int main(int argc, char **argv) {
             }
         } 
     }
-    
+   
+    /* Safety close - this code should be unreachable */ 
     /* Close the file writer */
     if (fw != NULL) {
         fclose(fw);
@@ -694,7 +697,7 @@ int main(int argc, char **argv) {
 }
 
 /*
- *  Initialize the unicast send sockets TODO: Might as well put this in the main function
+ *  Initialize the unicast send sockets 
  */
 struct sockaddr_in initUnicastSend(int next_ip)
 {
