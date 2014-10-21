@@ -16,7 +16,7 @@
 #define BURST_MSG       110
 #define WINDOW_SIZE     7000
 #define MAX_PACKET_SIZE 1400
-#define PAYLOAD_SIZE    1200
+#define PAYLOAD_SIZE    1434
 #define TOKEN_BURST     3
 #define RAND_RANGE_MAX  1000000
 #define TIMEOUT_USEC    250

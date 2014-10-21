@@ -557,17 +557,17 @@ int main(int argc, char **argv) {
                            0, (struct sockaddr *)&send_addr_ucast, sizeof(send_addr_ucast) );
                         burst_count++;
                         if (fw != NULL) {
-                            fclose(fw); 
-                            fw = NULL;
                             gettimeofday(&end_time, 0);
                             int total_time =
                                 (end_time.tv_sec*1e6 + end_time.tv_usec)
                                 - (start_time.tv_sec*1e6 + start_time.tv_usec);
                             printf("Total measured time: %d ms\n", (int)(total_time/1e3));
-                            printf("Throughput: %f mbps\n\n", (token.seq + 1) * 1216 * 8.0 / total_time);
+                            printf("Throughput: %f mbps\n\n", (token.seq + 1) * 1384 * 8.0 / total_time);
                             /* Free window heap memory */
                             for (int i = 0; i < WINDOW_SIZE; i++)
                                 free(window[i]);
+                            fclose(fw); 
+                            fw = NULL;
                             return 0;
                         }
                     }
